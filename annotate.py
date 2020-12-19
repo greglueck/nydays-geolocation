@@ -1,3 +1,4 @@
+import annotated_json
 import argparse
 import datetime
 import json
@@ -12,7 +13,7 @@ def main():
   # Parse command line arguments and read input files.
   parse_args()
   raw = read_raw_file()
-  annotated = read_annotated_file()
+  annotated = annotated_json.read(args.annotated)
 
   # Convert the raw timeline data into a dictionary indexed by the timestamp.
   # Since the raw timeline data is big, delete it in hopes of recovering the
@@ -34,7 +35,7 @@ def main():
   # state, and add these to the annotated set.  Write out the new annotated
   # file.
   annotate(annotated, raw_mapped)
-  write_annotated_file(annotated)
+  annotated_json.write(annotated, args.annotated)
 
 
 def parse_args():
@@ -59,45 +60,6 @@ def read_raw_file():
   except IOError:
     print(f'ERROR: Input raw timeline file "{args.raw}" does not exist.')
     sys.exit(1)
-
-
-def read_annotated_file():
-  """Read the annotated file (if it exists), and return its data."""
-  try:
-    with open(args.annotated) as f:
-      converted = json.load(f)
-  except IOError:
-    converted = {}
-
-  # The JSON file stores the dictionary keys as strings.  Convert the date
-  # keys into Data objects and the timestamp keys into integers.
-  annotated = {}
-  for day_conv, day_entry_conv in converted.items():
-    day = datetime.date.fromisoformat(day_conv)
-    day_entry = {}
-    annotated[day] = day_entry
-    for ts_conv, entry in day_entry_conv.items():
-      ts = int(ts_conv)
-      day_entry[ts] = entry
-  return annotated
-
-
-def write_annotated_file(annotated):
-  """Write the annotated file."""
-
-  # JSON can't represent dictionary keys that are Date objects.  Convert them
-  # into string form.  Note that "json.dump()" automatically converts the
-  # integer timestamps keys into strings.
-  converted = {}
-  for day, day_entry in annotated.items():
-    day_conv = day.isoformat()
-    converted[day_conv] = day_entry
-
-  try:
-    with open(args.annotated, 'w') as f:
-      json.dump(converted, f, sort_keys=True, indent=2)
-  except IOError:
-    print(f'ERROR: Unable to write annotated file "{args.raw}".')
 
 
 def map_by_timestamp(raw):
