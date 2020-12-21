@@ -95,10 +95,10 @@ def check(ny_days, annotated):
         err.append(day)
         break
   if warn:
-    print('WARNING: No location data for the following non-NY days:')
+    print(f'WARNING: No location data for {len(warn)} non-NY days:')
     for day in warn: print(f'  {day}')
   if err:
-    print('ERROR: Spreadsheet non-NY days have locations in NY:')
+    print(f'ERROR: {len(err)} spreadsheet non-NY days have locations in NY:')
     for day in err: print(f'  {day}')
     sys.exit(1)
 

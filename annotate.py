@@ -3,7 +3,7 @@ import argparse
 import datetime
 import json
 import pytz
-import reverse_geocoder as rg 
+import reverse_geocoder as rg
 import sys
 
 
@@ -48,7 +48,8 @@ def parse_args():
   parser.add_argument('-a', '--annotated', required=True,
       help='Annotated output JSON file.')
   parser.add_argument('--accuracy', default=800, type=int,
-      help='Skip raw entries whose "accuracy" is greater than this threshold.')
+      help='Skip entries whose "accuracy" is greater than this threshold. ' +
+        'Zero means do not skip any entries.')
   args = parser.parse_args()
 
 
@@ -115,16 +116,32 @@ def trim(annotated, raw_mapped):
   the annotated set.  Also removes entries from both the annotated and raw data
   sets whose accuracy is below the threshold.
   """
-  for day_entry in annotated.values():
+
+  # Remove inaccurate entries from the raw data.
+  if args.accuracy:
+    inaccurate = [ts for ts, entry in raw_mapped.items()
+        if entry['accuracy'] > args.accuracy]
+    if inaccurate:
+      print(f'INFO: Skipping {len(inaccurate)} inaccurate entries.')
+      for ts in inaccurate: del raw_mapped[ts]
+
+  empty_days = []
+  for day, day_entry in annotated.items():
+    # Remove previously annottated inaccurate entries.
+    if args.accuracy:
+      inaccurate = [ts for ts, entry in day_entry.items()
+          if entry['accuracy'] > args.accuracy]
+      for ts in inaccurate: del day_entry[ts]
+      if not day_entry: empty_days.append(day)
+
+    # Remove raw entries that have already been annotated, so we don't spend
+    # time annotating them again.
     for ts in day_entry.keys():
       del raw_mapped[ts]
-    inaccurate = [ts for ts, entry in day_entry.items()
-        if entry['accuracy'] > args.accuracy]
-    for ts in inaccurate: del day_entry[ts]
 
-  inaccurate = [ts for ts, entry in raw_mapped.items()
-      if entry['accuracy'] > args.accuracy]
-  for ts in inaccurate: del raw_mapped[ts]
+  # The removal of previously annotated inaccurate entries may have left some
+  # entries in the annotated dictionary empty.  Remove these.
+  for day in empty_days: del annotated[day]
 
 
 def annotate(annotated, raw_mapped):
@@ -133,7 +150,7 @@ def annotate(annotated, raw_mapped):
   geocoding to determine the US state that contains each coordinate.  Because
   some reverse geocoding services have a daily limit on the number of requests,
   some raw entries might not be added to the annotated set.  If this happens,
-  a warning message is printed.
+  an info message is printed.
   """
   coords = []
   for entry in raw_mapped.values():
@@ -147,7 +164,7 @@ def annotate(annotated, raw_mapped):
     states = []
   if len(states) < len(coords):
     remaining = len(coords) - len(states)
-    print(f'WARNING: There are {remaining} timestamp entries not annotated yet.')
+    print(f'INFO: There are {remaining} timestamp entries not annotated yet.')
 
   # The annotated data is indexed by date in New York, so convert each timestamp
   # to Eastern time zone and get the date in that timezone.
@@ -247,5 +264,5 @@ def geomap(coords):
   return states
 
 
-if __name__=="__main__": 
+if __name__=="__main__":
   main()
