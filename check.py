@@ -96,11 +96,32 @@ def check(ny_days, annotated):
         break
   if warn:
     print(f'WARNING: No location data for {len(warn)} non-NY days:')
-    for day in warn: print(f'  {day}')
+    print_days('  ', warn)
   if err:
     print(f'ERROR: {len(err)} spreadsheet non-NY days have locations in NY:')
-    for day in err: print(f'  {day}')
+    print_days('  ', err)
     sys.exit(1)
+
+
+def print_days(prefix, days):
+  """
+  Print a list of dates, where each range of consecutive dates is on its own
+  line.  Each line is prefixed by the string "prefix".
+  """
+  i = 0
+  while i < len(days):
+    first_day = days[i]
+    last_day = first_day
+    for j in range(i+1, len(days)):
+      day = days[j]
+      if day != last_day + datetime.timedelta(days=1): break
+      last_day = day
+      i = j
+    if (first_day == last_day):
+      print(prefix + f'{first_day}')
+    else:
+      print(prefix + f'{first_day} - {last_day}')
+    i += 1
 
 
 if __name__=="__main__":
