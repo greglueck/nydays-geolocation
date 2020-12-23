@@ -3,8 +3,10 @@ import argparse
 import datetime
 import json
 import pytz
+import requests
 import reverse_geocoder as rg
 import sys
+import time
 
 
 args = None
@@ -48,6 +50,8 @@ def parse_args():
   parser.add_argument('--geocoder', choices=['local', 'osm'],
       help='Reverse geocoding service to use, only if annotated file does '
         'not yet exist.')
+  parser.add_argument('--email',
+      help='Your email address. Required when using "osm" geocoder.')
   args = parser.parse_args()
 
 
@@ -264,7 +268,152 @@ def geocode_local(coords):
 
 
 def geocode_osm(coords):
-  return []
+  # The Nominatim service returns a "state" field which identifies the US
+  # state or territory.  This dictionary translates that field into a 2-letter
+  # state code, except for territories which are translated to "EX".
+  translate_state = {
+    'Alabama': 'AL',
+    'Alaska': 'AK',
+    'Arizona': 'AZ',
+    'Arkansas': 'AR',
+    'California': 'CA',
+    'Colorado': 'CO',
+    'Connecticut': 'CT',
+    'Delaware': 'DE',
+    'District of Columbia': 'DC',
+    'Florida': 'FL',
+    'Georgia': 'GA',
+    'Guam': 'EX',
+    'Hawaii': 'HI',
+    'Idaho': 'ID',
+    'Illinois': 'IL',
+    'Indiana': 'IN',
+    'Iowa': 'IA',
+    'Kansas': 'KS',
+    'Kentucky': 'KY',
+    'Louisiana': 'LA',
+    'Maine': 'ME',
+    'Maryland': 'MD',
+    'Massachusetts': 'MA',
+    'Michigan': 'MI',
+    'Minnesota': 'MN',
+    'Mississippi': 'MS',
+    'Missouri': 'MO',
+    'Montana': 'MT',
+    'Nebraska': 'NE',
+    'Nevada': 'NV',
+    'New Hampshire': 'NH',
+    'New Jersey': 'NJ',
+    'New Mexico': 'NM',
+    'New York': 'NY',
+    'North Carolina': 'NC',
+    'North Dakota': 'ND',
+    'Northern Mariana Islands': 'EX',
+    'Ohio': 'OH',
+    'Oklahoma': 'OK',
+    'Oregon': 'OR',
+    'Pennsylvania': 'PA',
+    'Puerto Rico': 'EX',
+    'Rhode Island': 'RI',
+    'South Carolina': 'SC',
+    'South Dakota': 'SD',
+    'Tennessee': 'TN',
+    'Texas': 'TX',
+    'Utah': 'UT',
+    'Vermont': 'VT',
+    'Virginia': 'VA',
+    'United States Virgin Islands': 'EX',
+    'Washington': 'WA',
+    'West Virginia': 'WV',
+    'Wisconsin': 'WI',
+    'Wyoming': 'WY'
+  }
+
+  if not args.email:
+    print(f'ERROR: Must specify email adress when using "osm" geocoder.')
+    sys.exit(1)
+
+  # Each coordinate is reverse mapped by sending a REST request to the
+  # openstreetmap server.  The "zoom" argument says that we only care about
+  # state-level granularity.  The "email" argument is required by their usage
+  # policy.
+  url = 'https://nominatim.openstreetmap.org/reverse'
+  req_args = {
+    'format': 'json',
+    'zoom': 5,
+    'email': args.email
+  }
+
+  # Loop over all coordinates, reverse geocoding each one.  This may take a
+  # long time if there are many coordinates.  Therefore, the strategy for
+  # error handling is to print the error message and terminate the loop, but
+  # return any data that was successfully geocoded.  This allows the
+  # successful data to be stored in the annotated file.
+  states = []
+  completed = 0
+  total = len(coords)
+  print('INFO: You can interrupt by pressing CTRL-C.')
+  try:
+    for c in coords:
+      # Add the coordinates to the argument list and send the request.
+      req_args['lat'] = c[0]
+      req_args['lon'] = c[1]
+      r = requests.get(url, params=req_args)
+
+      # If we get an error code or the response isn't JSON format,
+      # something is wrong.
+      if r.status_code != requests.codes.ok:
+        if completed: print('')
+        print(f'ERROR: Response error: {r.status_code}.')
+        break
+      try:
+        rjson = r.json()
+      except ValueError:
+        if completed: print('')
+        print(f'ERROR: Response not JSON.')
+        break
+
+      # If a coordinate is outside of any country (e.g. in the middle of the
+      # ocean), the server seems to return an "error" field and omit the
+      # "address" field.  Therefore, treat this condition as a location that
+      # is outside of any US state.
+      #
+      # Locations in US territories set the country code to "us", but only
+      # some territories return the name of the territory in the "state"
+      # field.  Other territories simply omit the "state" field entirely.
+      # Therefore, if the "state" field is missing, just treat this as a
+      # location that is outside of any US state.
+      if 'error' in rjson or 'address' not in rjson or \
+          rjson['address'].get('country_code') != 'us' or \
+          'state' not in rjson['address']:
+        states.append('EX')
+      else:
+        # The "translate_state" dictionary contains all the values we expect
+        # to see in the "state" field.  If we see any other value, diagnose an
+        # error, so the dictionary can be updated.
+        rstate = rjson['address']['state']
+        if rstate not in translate_state:
+          if completed: print('')
+          print(f'ERROR: Unexpected "state" from reverse geocode "{rstate}".')
+          break
+        else:
+          states.append(translate_state[rstate])
+
+      # Print progress and wait 1 second.  The terms of use require a 1 second
+      # delay between requests.
+      # https://operations.osmfoundation.org/policies/nominatim/
+      completed += 1
+      pct = completed / total
+      print(f'\rINFO: Completed {completed} annotations ({pct:.0f}%).',
+        end='', flush=True)
+      time.sleep(1)
+    else:
+      print('')
+  except KeyboardInterrupt:
+    if completed: print('')
+    print('INFO: Interrupted from keyboard.')
+
+  return states
 
 
 if __name__=="__main__":
