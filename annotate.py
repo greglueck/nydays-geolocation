@@ -26,9 +26,6 @@ def main():
   validate(annotated, raw_mapped)
 
   # Remove entries from "raw_mapped" which are already in the annotated set.
-  # Remove entries from both "raw_mapped" and "annotated" which are deemed
-  # inaccurate.  Anything left in "raw_mapped" should be added to the annotated
-  # set.
   trim(annotated, raw_mapped)
 
   # Reverse geocode all entries from "raw_mapped" to get the containing US
@@ -42,14 +39,15 @@ def parse_args():
   """Parse the command line arguments into global "args"."""
   global args
   parser = argparse.ArgumentParser(
-      description='Create or update annotated geolocation file from Google timeline.')
+      description='Create or update annotated geolocation file from Google '
+        'timeline.')
   parser.add_argument('-r', '--raw', required=True,
       help='Raw Google timeline input JSON file.')
   parser.add_argument('-a', '--annotated', required=True,
       help='Annotated output JSON file.')
-  parser.add_argument('--accuracy', default=800, type=int,
-      help='Skip entries whose "accuracy" is greater than this threshold. ' +
-        'Zero means do not skip any entries.')
+  parser.add_argument('--geocoder', choices=['local', 'osm'],
+      help='Reverse geocoding service to use, only if annotated file does '
+        'not yet exist.')
   args = parser.parse_args()
 
 
@@ -87,7 +85,7 @@ def validate(annotated, raw_mapped):
   """
   missing = []
   changed = []
-  for day_entry in annotated.values():
+  for day_entry in annotated['days'].values():
     for ts, entry in day_entry.items():
       if ts not in raw_mapped:
         missing.append(ts)
@@ -98,13 +96,13 @@ def validate(annotated, raw_mapped):
             entry['accuracy'] != raw_entry['accuracy']):
           changed.append(ts)
   if missing:
-    print('ERROR: Annotated file contains timestamps that are missing from raw file:')
-    for ts in missing:
-      print(f'  {ts}')
+    print('ERROR: Annotated file contains timestamps that are missing from '
+      'raw file:')
+    for ts in missing: print(f'  {ts}')
   if changed:
-    print('ERROR: Annotated file contains timestamp entries that are different from raw file:')
-    for ts in changed:
-      print(f'  {ts}')
+    print('ERROR: Annotated file contains timestamp entries that are different '
+      'from raw file:')
+    for ts in changed: print(f'  {ts}')
   if missing or changed:
     sys.exit(1)
 
@@ -113,35 +111,11 @@ def trim(annotated, raw_mapped):
   """
   Remove entries from the raw data which already exist in the annotated data,
   so that the raw data represents only those entries that need to be added to
-  the annotated set.  Also removes entries from both the annotated and raw data
-  sets whose accuracy is below the threshold.
+  the annotated set.
   """
-
-  # Remove inaccurate entries from the raw data.
-  if args.accuracy:
-    inaccurate = [ts for ts, entry in raw_mapped.items()
-        if entry['accuracy'] > args.accuracy]
-    if inaccurate:
-      print(f'INFO: Skipping {len(inaccurate)} inaccurate entries.')
-      for ts in inaccurate: del raw_mapped[ts]
-
-  empty_days = []
-  for day, day_entry in annotated.items():
-    # Remove previously annottated inaccurate entries.
-    if args.accuracy:
-      inaccurate = [ts for ts, entry in day_entry.items()
-          if entry['accuracy'] > args.accuracy]
-      for ts in inaccurate: del day_entry[ts]
-      if not day_entry: empty_days.append(day)
-
-    # Remove raw entries that have already been annotated, so we don't spend
-    # time annotating them again.
+  for day_entry in annotated['days'].values():
     for ts in day_entry.keys():
       del raw_mapped[ts]
-
-  # The removal of previously annotated inaccurate entries may have left some
-  # entries in the annotated dictionary empty.  Remove these.
-  for day in empty_days: del annotated[day]
 
 
 def annotate(annotated, raw_mapped):
@@ -152,19 +126,34 @@ def annotate(annotated, raw_mapped):
   some raw entries might not be added to the annotated set.  If this happens,
   an info message is printed.
   """
+
+  # Make sure the command line doesn't request a different geocoding service
+  # if the annotated file already exists.
+  if 'geocoder' in annotated and args.geocoder:
+    if annotated['geocoder'] != args.geocoder:
+      print(f'ERROR: Annotated file already uses "{annotated["geocoder"]}", '
+        'cannot specify different geocoding service on command line.')
+      sys.exit(1)
+
+  # If the annotated file doesn't exist yet, set the geocoding service
+  # according to the command line.
+  if 'geocoder' not in annotated:
+    annotated['geocoder'] = args.geocoder or 'local'
+
+  # Get the list of coordinates to reverse geocode.
   coords = []
   for entry in raw_mapped.values():
     lat = entry['latitudeE7'] / 1E7
     lon = entry['longitudeE7'] / 1E7
     coords.append((lat, lon))
+  if not coords:
+    return
 
-  if coords:
-    states = geomap(coords)
-  else:
-    states = []
+  print(f'INFO: Annotating {len(coords)} entries.')
+  states = geocode(coords, annotated['geocoder'])
   if len(states) < len(coords):
     remaining = len(coords) - len(states)
-    print(f'INFO: There are {remaining} timestamp entries not annotated yet.')
+    print(f'INFO: There are still {remaining} entries not annotated yet.')
 
   # The annotated data is indexed by date in New York, so convert each timestamp
   # to Eastern time zone and get the date in that timezone.
@@ -172,8 +161,8 @@ def annotate(annotated, raw_mapped):
   for state, (ts, raw_entry) in zip(states, raw_mapped.items()):
     dtEastern = datetime.datetime.fromtimestamp(ts/1000, tz=eastern)
     day = dtEastern.date()
-    if not day in annotated: annotated[day] = {}
-    day_entry = annotated[day]
+    if not day in annotated['days']: annotated['days'][day] = {}
+    day_entry = annotated['days'][day]
     day_entry[ts] = {
       'latitudeE7': raw_entry['latitudeE7'],
       'longitudeE7': raw_entry['longitudeE7'],
@@ -182,17 +171,27 @@ def annotate(annotated, raw_mapped):
     }
 
 
-def geomap(coords):
+def geocode(coords, geocoder):
   """
-  Use the "reverse_geocode" package to reverse geolocate each coordinate to a
+  Reverse geocode each coordinate to a US state, using the geocoding
+  service specified by "geocoder".  Returns a list of strings, where each
+  string is a 2-letter US state code (or "EX" if a coordinate is outside of
+  the US).  The returned list may have fewer element than "coords" if the
+  geocoding service is unable to translate all the coordinates.
+  """
+  if geocoder == 'local': return geocode_local(coords)
+  if geocoder == 'osm': return geocode_osm(coords)
+  return []
+
+
+def geocode_local(coords):
+  """
+  Use the "reverse_geocoder" package to reverse geocode each coordinate to a
   US state.  Since this package runs locally, there is no limit on the number
-  of queries, so it reverse geolocates all coordinates.
-
-  Returns a list of strings, where each string is a 2-letter US state code (or
-  "EX" if a coordinate is outside of the US).
+  of queries, so it reverse geocodes all coordinates.
   """
 
-  # The reverse geolocate results includes an "admin1" field which identifies
+  # The reverse geocode results includes an "admin1" field which identifies
   # the US state.  This dictionary maps this "admin1" field to a 2-letter state
   # code.
   admin_to_state = {
@@ -257,11 +256,15 @@ def geomap(coords):
     if cc != 'US':
       states.append('EX')
     elif admin1 not in admin_to_state:
-      print(f'ERROR: Unexpected "admin1" from geo decode: {admin1}')
+      print(f'ERROR: Unexpected "admin1" from reverse geocode "{admin1}".')
       sys.exit(1)
     else:
       states.append(admin_to_state[admin1])
   return states
+
+
+def geocode_osm(coords):
+  return []
 
 
 if __name__=="__main__":

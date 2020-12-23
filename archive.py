@@ -72,10 +72,13 @@ def get_annotated_archive(annotated):
   Return a subset of the annotated data, containing only days that fall within
   the requested tax year.
   """
-  archive = {}
-  for day, day_entry in annotated.items():
+  archive = {
+    'geocoder': annotated['geocoder'],
+    'days': {}
+  }
+  for day, day_entry in annotated['days'].items():
     if day.year == args.year:
-      archive[day] = day_entry
+      archive['days'][day] = day_entry
   return archive
 
 
@@ -93,10 +96,10 @@ def write_output(raw, annotated):
   # existing archive data.
   err = False
   if raw_path.exists():
-    print(f'ERROR: Output file already exists "{raw_path}"')
+    print(f'ERROR: Output file already exists "{raw_path}".')
     err = True
   if annotated_path.exists():
-    print(f'ERROR: Output file already exists "{annotated_path}"')
+    print(f'ERROR: Output file already exists "{annotated_path}".')
     err = True
   if err:
     sys.exit(1)

@@ -25,13 +25,17 @@ def parse_args():
   """Parse the command line arguments into global "args"."""
   global args
   parser = argparse.ArgumentParser(
-      description='Validate the NY Days spreadsheet against the annotated location data.')
+      description='Validate the NY Days spreadsheet against the annotated '
+        'location data.')
   parser.add_argument('-a', '--annotated', required=True,
       help='Annotated JSON file.')
   parser.add_argument('-w', '--workbook', required=True,
       help='Excel workbook with NY Days spreadsheet.')
   parser.add_argument('-s', '--sheet', required=True,
       help='Name of NY Days spreadsheet within workbook.')
+  parser.add_argument('--accuracy', default=800, type=int,
+      help='Skip location entries whose "accuracy" is greater than this '
+        'threshold. Zero means do not skip any entries.')
   args = parser.parse_args()
 
 
@@ -40,10 +44,11 @@ def get_worksheet():
   try:
     wb = openpyxl.load_workbook(args.workbook)
   except IOError:
-    print(f'ERROR: Unable to open Excel workbook "{args.workbook}"')
+    print(f'ERROR: Unable to open Excel workbook "{args.workbook}".')
     sys.exit(1)
   if args.sheet not in wb:
-    print(f'ERROR: Worksheet "{args.sheet}"" does not exist in "{args.workbook}"')
+    print(f'ERROR: Worksheet "{args.sheet}"" does not exist in '
+      f'"{args.workbook}".')
     sys.exit(1)
   return wb[args.sheet]
 
@@ -85,15 +90,32 @@ def check(ny_days, annotated):
   """
   warn = []
   err = []
+  inaccurate_count = 0
   for day, in_ny in ny_days.items():
     if in_ny: continue
-    if day not in annotated:
+
+    # Create a list of the accureate timestamp entries for this day.
+    accurate = []
+    if day in annotated['days']:
+      for entry in annotated['days'][day].values():
+        if args.accuracy and entry['accuracy'] > args.accuracy:
+          inaccurate_count += 1
+        else:
+          accurate.append(entry)
+
+    # A non-NY day with no location data is a warning.
+    if not accurate:
       warn.append(day)
       continue
-    for entry in annotated[day].values():
+
+    # A non-NY day with a location in NY is an error.
+    for entry in accurate:
       if entry['state'] == 'NY':
         err.append(day)
         break
+
+  if inaccurate_count:
+    print(f'INFO: Skipped {inaccurate_count} inaccurate entries.')
   if warn:
     print(f'WARNING: No location data for {len(warn)} non-NY days:')
     print_days('  ', warn)

@@ -14,8 +14,8 @@ def main():
   # {day: {state: <count>, ...}, ...}
   summary = summarize(annotated)
 
-  # Get a list of all the states in our summary.  These will be the columns
-  # in our spreadsheet.
+  # Get a list of all the states in the summary.  These will be the columns
+  # in the spreadsheet.
   states = find_states(summary)
 
   # Create a 2-D list for the spreadsheet and write it out.
@@ -32,6 +32,9 @@ def parse_args():
       help='Annotated JSON file.')
   parser.add_argument('-o', '--output', required=True,
       help='Output CSV file.')
+  parser.add_argument('--accuracy', default=800, type=int,
+      help='Skip location entries whose "accuracy" is greater than this '
+        'threshold. Zero means do not skip any entries.')
   args = parser.parse_args()
 
 
@@ -42,12 +45,19 @@ def summarize(annotated):
   timestamp entries in that state for that day.
   """
   summary = {}
-  for day, day_entry in annotated.items():
+  inaccurate_count = 0
+  for day, day_entry in annotated['days'].items():
     summary[day] = {}
     for entry in day_entry.values():
-      state = entry['state']
-      if not state in summary[day]: summary[day][state] = 0
-      summary[day][state] += 1
+      if args.accuracy and entry['accuracy'] > args.accuracy:
+        inaccurate_count += 1
+      else:
+        state = entry['state']
+        if not state in summary[day]: summary[day][state] = 0
+        summary[day][state] += 1
+
+  if inaccurate_count:
+    print(f'INFO: Skipped {inaccurate_count} inaccurate entries.')
   return summary
 
 
