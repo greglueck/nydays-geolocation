@@ -52,6 +52,8 @@ def parse_args():
         'not yet exist.')
   parser.add_argument('--email',
       help='Your email address. Required when using "osm" geocoder.')
+  parser.add_argument('--limit', type=int,
+      help='Limit reverse geocoding to to this many requests.')
   args = parser.parse_args()
 
 
@@ -150,13 +152,18 @@ def annotate(annotated, raw_mapped):
     lat = entry['latitudeE7'] / 1E7
     lon = entry['longitudeE7'] / 1E7
     coords.append((lat, lon))
+    if args.limit and len(coords) >= args.limit: break
   if not coords:
     return
 
-  print(f'INFO: Annotating {len(coords)} entries.')
+  if len(raw_mapped) > len(coords):
+    print(f'INFO: Annotating {len(coords)} of {len(raw_mapped)} entries.')
+  else:
+    print(f'INFO: Annotating {len(coords)} entries.')
+
   states = geocode(coords, annotated['geocoder'])
-  if len(states) < len(coords):
-    remaining = len(coords) - len(states)
+  if len(states) < len(raw_mapped):
+    remaining = len(raw_mapped) - len(states)
     print(f'INFO: There are still {remaining} entries not annotated yet.')
 
   # The annotated data is indexed by date in New York, so convert each timestamp
@@ -403,7 +410,7 @@ def geocode_osm(coords):
       # delay between requests.
       # https://operations.osmfoundation.org/policies/nominatim/
       completed += 1
-      pct = completed / total
+      pct = (completed / total) * 100
       print(f'\rINFO: Completed {completed} annotations ({pct:.0f}%).',
         end='', flush=True)
       time.sleep(1)
