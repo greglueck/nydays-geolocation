@@ -1,13 +1,15 @@
-import annotated_json
 import argparse
 import datetime
+import dateutil.parser
+import pytz
+import util
 
 args = None
 
 def main():
   # Parse command line arguments and open annotated file.
   parse_args()
-  annotated = annotated_json.read(args.annotated)
+  annotated = util.read_json_file(args.annotated)
 
   # Create a dictionary summarizing the number of timestamp entries in each
   # US state for each day:
@@ -48,22 +50,30 @@ def summarize(annotated):
   summary = {}
   inaccurate_count = 0
   last_day = None
-  for day, day_entry in annotated['days'].items():
+  eastern = pytz.timezone('US/Eastern')
+  for entry in annotated['locations']:
+    # Since NY is in the Eastern timezone, get the day of this entry in that
+    # timezone.
+    ts = dateutil.parser.isoparse(entry['timestamp'])
+    tsEastern = ts.astimezone(eastern)
+    day = tsEastern.date()
+
     # Create empty entries for any missing days from the annotated data.
-    if last_day:
+    if last_day and last_day < day:
       last_day += datetime.timedelta(days=1)
       while last_day < day:
         summary[last_day] = {}
         last_day += datetime.timedelta(days=1)
 
-    summary[day] = {}
-    for entry in day_entry.values():
-      if args.accuracy and entry['accuracy'] > args.accuracy:
-        inaccurate_count += 1
-      else:
-        state = entry['state']
-        if not state in summary[day]: summary[day][state] = 0
-        summary[day][state] += 1
+    if args.accuracy and entry['accuracy'] > args.accuracy:
+      inaccurate_count += 1
+    else:
+      if day not in summary:
+        summary[day] = {}
+      state = entry['state']
+      if not state in summary[day]:
+        summary[day][state] = 0
+      summary[day][state] += 1
     last_day = day
 
   if inaccurate_count:

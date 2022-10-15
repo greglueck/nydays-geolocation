@@ -1,24 +1,30 @@
-import annotated_json
 import argparse
 import datetime
+import dateutil.parser
 import openpyxl
+import pytz
 import sys
+import util
 
 args = None
 
 def main():
   # Parse command line arguments and read input files.
   parse_args()
-  annotated = annotated_json.read(args.annotated)
+  annotated = util.read_json_file(args.annotated)
   ws = get_worksheet()
 
   # Create a dictionary from the NY Days spreadsheet, mapping each day to a
   # Boolean telling whether the day is a "NY day".
   ny_days = get_ny_days(ws)
 
+  # Create a dictionary that maps each day to the annotated entries for that
+  # day.
+  mapped = map_days_to_entries(annotated)
+
   # Check the dictionary against the location data to see if any non-NY day
   # was actually spent in NY.
-  check(ny_days, annotated)
+  check(ny_days, mapped)
 
 
 def parse_args():
@@ -82,7 +88,25 @@ def get_ny_days(ws):
   return ny_days
 
 
-def check(ny_days, annotated):
+def map_days_to_entries(annotated):
+  """
+  Create a dictionary from the annotated timestamp entries.  Each key is a "date" 
+  object representing a day in NY timezone, and each value is a list of the
+  annotated entries for that day.
+  """
+  mapped = {}
+  eastern = pytz.timezone('US/Eastern')
+  for entry in annotated['locations']:
+    ts = dateutil.parser.isoparse(entry['timestamp'])
+    tsEastern = ts.astimezone(eastern)
+    day = tsEastern.date()
+    if not day in mapped:
+      mapped[day] = []
+    mapped[day].append(entry)
+  return mapped
+
+
+def check(ny_days, mapped):
   """
   Check the NY days spreadsheet against the location data.  Print warnings for
   any non-NY days that have no location data.  Print errors for any non-NY days
@@ -94,10 +118,10 @@ def check(ny_days, annotated):
   for day, in_ny in ny_days.items():
     if in_ny: continue
 
-    # Create a list of the accureate timestamp entries for this day.
+    # Create a list of the accurate timestamp entries for this day.
     accurate = []
-    if day in annotated['days']:
-      for entry in annotated['days'][day].values():
+    if day in mapped:
+      for entry in mapped[day]:
         if args.accuracy and entry['accuracy'] > args.accuracy:
           inaccurate_count += 1
         else:

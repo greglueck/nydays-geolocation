@@ -45,7 +45,7 @@ location data.  The utility then annotates only this new data and updates
 `<annotated-file>`.
 
 The `--geocoder` option allows you to select a reverse geocoding service to
-translate the lattidue / longitude coordinates to a US state.  The default
+translate the latitude / longitude coordinates to a US state.  The default
 uses a service that runs locally.  This runs quickly but may be less
 accurate.  The other option "osm" uses the open street map Nominatim service,
 which runs remotely.  This is much slower but also more accurate.  Using the
@@ -66,7 +66,7 @@ $python visualize.py -a <annotated-file> -o <csv-file> [--accuracy <number>]
 
 Each location entry in the raw data file contains an indication of the entry's
 accuracy.  The `--accuracy` option allows you to filter out location entries
-that are less accurate.  The default setting  shows only the entries that are
+that are less accurate.  The default setting shows only the entries that are
 very accurate (an accuracy value of 800 or less).  Specify a larger value to
 display more entries or specify `--accuracy 0` to disable the filter and
 display all entries.
@@ -74,8 +74,8 @@ display all entries.
 ### check.py
 
 This utility assumes you care about the number of days spent in NY state, and
-it assume you have maintained an Excel spreadsheet recording this data.  The
-utility compares information from the spreadhseet with the location data and
+it assumes you have maintained an Excel spreadsheet recording this data.  The
+utility compares information from the spreadsheet with the location data and
 flags any mismatches.  For example, if the spreadsheet records that a day was
 spent outside of NY and the location data has an entry that is inside of NY on
 that day, the utility will flag this as an error.
@@ -104,7 +104,7 @@ on row 4:
 The `<start>` entry in column 1 is an Excel date that indicates the start of
 a range of days and `<end>` tells the end of that range, where the range
 includes both `<start>` and `<end>`.  The `<in NY>` value in column 5 tells
-whether these days were spent in NY: a non-empty value indicates the days were
+whether these days were spent in NY: an empty value indicates the days were
 not in NY whereas any other values indicates that days were spent in NY.
 The spreadsheet data ends when a row has a blank entry in either column 1 or
 column 3.  The script ignores the contents of the other columns (2, 4, and any
@@ -134,11 +134,85 @@ The archived files have the same format as the input raw and annotated files,
 so all the utility scripts can also be run on these archive files.
 
 
+## Formats of the raw and annotated JSON files
+
+The raw and annotated JSON files have similar formats.  The raw file looks
+like this:
+
+```
+{
+  "locations": [{
+    "latitudeE7": <integer>,
+    "longitudeE7": <integer>,
+    "accuracy": <integer>,
+    "timestamp": <string>
+    /* other entries */
+  },
+  ...
+  ]
+}
+```
+
+The annotated file adds "geocoder" and "state" fields:
+
+```
+{
+  "geocoder": <string>,
+  "locations": [{
+    "latitudeE7": <integer>,
+    "longitudeE7": <integer>,
+    "accuracy": <integer>,
+    "timestamp": <string>,
+    "state": <string>
+  },
+  ...
+  ]
+}
+```
+
+The meaning of each field is as follows:
+
+* `"geocoder"`: A string telling the geocoding service that was used to reverse
+  geocode the location data in the annotated JSON file.  Possible values are:
+
+  - `"local"`: The Python package "reverse_geocoder", which runs locally.
+  - `"osm"`: The Nominatim web service from openstreetmap.org.
+
+* `"locations"`: Google location history periodically records an entry telling
+  the location of your mobile device.  These entries are sorted by increasing
+  timestamp.
+
+* `"latitudeE7"`: An integer telling the latitude of the location.  The value
+  is the latitude multiplied by 1E7.
+
+* `"longitudeE7"`: An integer telling the longitude of the location.  The value
+ is the longitude multiplied by 1E7.
+
+* `"accuracy"`: The approximate accuracy of the location in meters.  A smaller
+  value indicates higher accuracy.
+
+* `"timestamp"`: The time at which the entry was recorded, a string in
+  [ISO-8601][1] format.
+
+* `"state"`: A string telling the US state that contains this location entry.
+  The values follow the 2-letter [USPS abbreviations][2] for the 50 US states
+  plus the District of Columbia.  The value "EX" indicates a location that is
+  outside of the US.
+
+The `"latitudeE7"`, `"longitudeE7"`, `"accuracy"`, and `"timestamp"` fields
+come directly from the raw Google takeout data, which is documented more fully
+[here][3].
+
+[1]: <https://en.wikipedia.org/wiki/ISO_8601>
+[2]: <https://about.usps.com/who-we-are/postal-history/state-abbreviations.htm>
+[3]: <https://locationhistoryformat.com/reference/records/>
+
+
 ## Development Utilities
 
 The project also contains the files `test-states.py` and `states.csv` which
 are useful for testing new geolocation services.  The CSV file contains a list
-of all the US states and territories along with a lattitude / longitude
+of all the US states and territories along with a latitude / longitude
 coordinate that is inside each one.  The `test-states.py` utility reads this
 CSV file and can be modified to pass each coordinate to a new geolocation
 service to see what is returned.

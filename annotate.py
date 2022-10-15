@@ -1,40 +1,38 @@
-import annotated_json
 import argparse
-import datetime
-import json
-import pytz
+import dateutil.parser
 import requests
 import reverse_geocoder as rg
 import sys
 import time
-
+import util
 
 args = None
 
 def main():
   # Parse command line arguments and read input files.
   parse_args()
-  raw = read_raw_file()
-  annotated = annotated_json.read(args.annotated)
+  raw = util.read_json_file(args.raw)
+  annotated = util.read_json_file(args.annotated)
 
-  # Convert the raw timeline data into a dictionary indexed by the timestamp.
-  # Since the raw timeline data is big, delete it in hopes of recovering the
-  # memory.
-  raw_mapped = map_by_timestamp(raw)
+  # Convert the raw and annotated location data into a dictionary indexed by
+  # the timestamp.  We no longer need the raw data anymore, so delete it in
+  # hopes of recovering the memory.
+  raw_mapped = map_by_timestamp(raw['locations'])
+  annotated_mapped = map_by_timestamp(annotated['locations'])
   del raw
 
   # Check to see if the input annotated data is still consistent with the raw
   # timeline data.  Raise an error if not.
-  validate(annotated, raw_mapped)
+  validate(annotated_mapped, raw_mapped)
 
   # Remove entries from "raw_mapped" which are already in the annotated set.
-  trim(annotated, raw_mapped)
+  trim(annotated_mapped, raw_mapped)
 
-  # Reverse geocode all entries from "raw_mapped" to get the containing US
-  # state, and add these to the annotated set.  Write out the new annotated
-  # file.
+  # Reverse geocode all remaining entries from "raw_mapped" to get the
+  # containing US state, and add these to the annotated locations data set.
+  # Write out the new annotated file.
   annotate(annotated, raw_mapped)
-  annotated_json.write(annotated, args.annotated)
+  util.write_json_file(annotated, args.annotated)
 
 
 def parse_args():
@@ -57,50 +55,37 @@ def parse_args():
   args = parser.parse_args()
 
 
-def read_raw_file():
-  """Read the Google timeline file, and return its data."""
-  try:
-    with open(args.raw) as f:
-      return json.load(f)
-  except IOError:
-    print(f'ERROR: Input raw timeline file "{args.raw}" does not exist.')
-    sys.exit(1)
-
-
-def map_by_timestamp(raw):
+def map_by_timestamp(locations):
   """
-  Translate the raw timeline data into a dictionary whose keys are integer
-  timestamps.  Each dictionary entry is another dictionary with the
-  coordinates.
+  Translate the location data into a dictionary whose keys are "datetime"
+  objects.  Each dictionary entry is the associated location data for that
+  timestamp.  Entries are inserted into the dictionary in the same order as
+  the entries in the location data.
   """
   mapped = {}
-  for loc in raw['locations']:
-    ts = int(loc['timestampMs'])
-    mapped[ts] = {
-      'latitudeE7': loc['latitudeE7'],
-      'longitudeE7' : loc['longitudeE7'],
-      'accuracy' : loc['accuracy']
-    }
+  for entry in locations:
+    ts = dateutil.parser.isoparse(entry['timestamp'])
+    mapped[ts] = entry
   return mapped
 
 
-def validate(annotated, raw_mapped):
+def validate(annotated_mapped, raw_mapped):
   """
   Check the annotated data to make sure it exists in the raw timeline data.
   Raise an error if data is missing or if a timestamp's entry is different.
   """
   missing = []
   changed = []
-  for day_entry in annotated['days'].values():
-    for ts, entry in day_entry.items():
-      if ts not in raw_mapped:
-        missing.append(ts)
-      else:
-        raw_entry = raw_mapped[ts]
-        if (entry['latitudeE7'] != raw_entry['latitudeE7'] or
-            entry['longitudeE7'] != raw_entry['longitudeE7'] or
-            entry['accuracy'] != raw_entry['accuracy']):
-          changed.append(ts)
+  for ts, annotated_entry in annotated_mapped.items():
+    if ts not in raw_mapped:
+      missing.append(ts)
+    else:
+      raw_entry = raw_mapped[ts]
+      if (annotated_entry['latitudeE7'] != raw_entry['latitudeE7'] or
+          annotated_entry['longitudeE7'] != raw_entry['longitudeE7'] or
+          annotated_entry['accuracy'] != raw_entry['accuracy'] or
+          annotated_entry['timestamp'] != raw_entry['timestamp']):
+        changed.append(ts)
   if missing:
     print('ERROR: Annotated file contains timestamps that are missing from '
       'raw file:')
@@ -113,15 +98,14 @@ def validate(annotated, raw_mapped):
     sys.exit(1)
 
 
-def trim(annotated, raw_mapped):
+def trim(annotated_mapped, raw_mapped):
   """
   Remove entries from the raw data which already exist in the annotated data,
   so that the raw data represents only those entries that need to be added to
   the annotated set.
   """
-  for day_entry in annotated['days'].values():
-    for ts in day_entry.keys():
-      del raw_mapped[ts]
+  for ts in annotated_mapped.keys():
+    del raw_mapped[ts]
 
 
 def annotate(annotated, raw_mapped):
@@ -166,20 +150,17 @@ def annotate(annotated, raw_mapped):
     remaining = len(raw_mapped) - len(states)
     print(f'INFO: There are still {remaining} entries not annotated yet.')
 
-  # The annotated data is indexed by date in New York, so convert each timestamp
-  # to Eastern time zone and get the date in that timezone.
-  eastern = pytz.timezone('US/Eastern')
-  for state, (ts, raw_entry) in zip(states, raw_mapped.items()):
-    dtEastern = datetime.datetime.fromtimestamp(ts/1000, tz=eastern)
-    day = dtEastern.date()
-    if not day in annotated['days']: annotated['days'][day] = {}
-    day_entry = annotated['days'][day]
-    day_entry[ts] = {
+  # Append entries to the "annotated" data, including the reverse geocoded
+  # state.
+  for state, (raw_entry) in zip(states, raw_mapped.values()):
+    entry = {
+      'timestamp': raw_entry['timestamp'],
       'latitudeE7': raw_entry['latitudeE7'],
       'longitudeE7': raw_entry['longitudeE7'],
       'accuracy': raw_entry['accuracy'],
       'state': state
     }
+    annotated['locations'].append(entry)
 
 
 def geocode(coords, geocoder):
