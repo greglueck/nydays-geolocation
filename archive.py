@@ -26,19 +26,35 @@ def parse_args():
   """Parse the command line arguments into global "args"."""
   global args
   parser = argparse.ArgumentParser(
-      description='Create archives of the raw and annotated files for a tax year.')
+      description='Create archives of the raw and annotated files for one or more tax years.',
+      epilog='Must supply either --year or both --begin and --end')
   parser.add_argument('-r', '--raw', required=True,
       help='Raw Google timeline JSON file.')
   parser.add_argument('-a', '--annotated', required=True,
       help='Annotated JSON file.')
-  parser.add_argument('-y', '--year', required=True, type=int,
+  parser.add_argument('-y', '--year', type=int,
       help='Tax year to archive.')
+  parser.add_argument('-b', '--begin', type=int,
+      help='First tax year to archive.')
+  parser.add_argument('-e', '--end', type=int,
+      help='Last tax year to archive.')
   parser.add_argument('-n', '--name', required=True,
       help='Name of person, used to name output file.')
   parser.add_argument('-o', '--output', required=True,
       help='Name of directory where output files are written.')
   args = parser.parse_args()
-
+  if (args.year and args.begin) or (args.year and args.end):
+    print('ERROR: --year is mutually exclusive with --begin and --end')
+    sys.exit(1)
+  if (args.begin and not args.end) or (args.end and not args.begin):
+    print('ERROR: Must specify both --begin and --end (or specify --year)')
+    sys.exit(1)
+  if not args.year and not args.begin:
+    print('ERROR: Must specify either --year or both --begin and --end')
+    sys.exit(1)
+  if args.year:
+    args.begin = args.year
+    args.end = args.year
 
 def get_archived_raw(raw):
   """
@@ -71,7 +87,7 @@ def get_archived_locations(locations):
   for entry in locations:
     ts = dateutil.parser.isoparse(entry['timestamp'])
     tsEastern = ts.astimezone(eastern)
-    if tsEastern.year == args.year:
+    if (tsEastern.year >= args.begin) and (tsEastern.year <= args.end):
       archived.append(entry)
   return archived
 
@@ -81,9 +97,13 @@ def write_output(raw, annotated):
 
   # Get pathnames to the archive files.
   out_path = pathlib.Path(args.output)
-  raw_name = f'geo-location-{args.name}-{args.year}-raw.json'
+  if args.begin == args.end:
+    year = f'{args.begin}'
+  else:
+    year = f'{args.begin}-{args.end}'
+  raw_name = f'geo-location-{args.name}-{year}-raw.json'
   raw_path = pathlib.Path(args.output, raw_name)
-  annotated_name = f'geo-location-{args.name}-{args.year}-annotated.json'
+  annotated_name = f'geo-location-{args.name}-{year}-annotated.json'
   annotated_path = pathlib.Path(args.output, annotated_name)
 
   # Check if these archive files already exists.  We don't want to overwrite

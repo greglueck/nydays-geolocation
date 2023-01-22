@@ -112,26 +112,35 @@ columns after 5).
 
 ### archive.py
 
-This utility archives the location data for a particular year.  Usage is like:
+This utility archives the location data for a particular year or for a range
+of years.  Usage is like:
 
 ```
-$ python archive.py -r <raw-file> -a <annotated-file> -y <year> -n <name> \
-  -o <output-directory>
+$ python archive.py -r <raw-file> -a <annotated-file> \
+  [-y <year> | -b <begin> -e <end>] \
+  -n <name> -o <output-directory>
 ```
 
 The `<raw-file>` and `<annotated-file>` specify the pathnames to the raw and
-annotated JSON files.  The `<year>` is a number specifying the year to
-archive.  For example, specifying `2020` archives the location data
-corresponding to days in the year 2020.  The `<name>` is used to create the
-name of the output files, which are written to the `<output-directory>`.  Two
-output files are written, one for the raw JSON data and one for the annotated
-data, which have the following names:
+annotated JSON files.  The year(s) to archive can either be specifed as a
+single `<year>` or as a range `<begin>` and `<end>`.  These values are
+numbers, for example `-b 2020 -e 2022` archives the location data coresponding
+to the days in years 2020 - 2022 (inclusive).
+
+The `<name>` is used to create the name of the output files, which are written
+to the `<output-directory>`.  Two output files are written, one for the raw
+JSON data and one for the annotated data, which have the following names:
 
 * `<output-directory>`/geo-location-`<name>`-`<year>`-annotated.json
 * `<output-directory>`/geo-location-`<name>`-`<year>`-raw.json
 
+or:
+
+* `<output-directory>`/geo-location-`<name>`-`<begin>`-`<end>`-annotated.json
+* `<output-directory>`/geo-location-`<name>`-`<begin>`-`<end>`-raw.json
+
 The archived files have the same format as the input raw and annotated files,
-so all the utility scripts can also be run on these archive files.
+so all the utility scripts can also be run on these archived files.
 
 
 ## Formats of the raw and annotated JSON files
