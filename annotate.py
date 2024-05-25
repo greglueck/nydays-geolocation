@@ -87,12 +87,12 @@ def validate(annotated_mapped, raw_mapped):
           annotated_entry['timestamp'] != raw_entry['timestamp']):
         changed.append(ts)
   if missing:
-    print('ERROR: Annotated file contains timestamps that are missing from '
-      'raw file:')
+    print(f'ERROR: Annotated file contains {len(missing)} timestamp entries '
+      'that are missing from raw file:')
     for ts in missing: print(f'  {ts}')
   if changed:
-    print('ERROR: Annotated file contains timestamp entries that are different '
-      'from raw file:')
+    print(f'ERROR: Annotated file contains {len(changed)} timestamp entries '
+      'that are different from raw file:')
     for ts in changed: print(f'  {ts}')
   if missing or changed:
     sys.exit(1)
