@@ -17,21 +17,25 @@ def main():
   # Convert the raw and annotated location data into a dictionary indexed by
   # the timestamp.  We no longer need the raw data anymore, so delete it in
   # hopes of recovering the memory.
-  raw_mapped = map_by_timestamp(raw['locations'])
-  annotated_mapped = map_by_timestamp(annotated['locations'])
+  ts_to_raw, _ = map_by_timestamp(raw['locations'])
+  ts_to_annotated, ts_to_annotated_index = map_by_timestamp(annotated['locations'])
   del raw
 
   # Check to see if the input annotated data is still consistent with the raw
-  # timeline data.  Raise an error if not.
-  validate(annotated_mapped, raw_mapped)
+  # timeline data.  If not, either raise an error or remove the inconsistent
+  # entries, depending on the command line arguments.  If inconsistent entries
+  # are removed, the "ts_to_annotated_index" map is no longer accurate, so
+  # delete it.
+  validate(ts_to_annotated, ts_to_raw, ts_to_annotated_index, annotated)
+  del ts_to_annotated_index
 
-  # Remove entries from "raw_mapped" which are already in the annotated set.
-  trim(annotated_mapped, raw_mapped)
+  # Remove entries from "ts_to_raw" which are already in the annotated set.
+  trim(ts_to_annotated, ts_to_raw)
 
-  # Reverse geocode all remaining entries from "raw_mapped" to get the
+  # Reverse geocode all remaining entries from "ts_to_raw" to get the
   # containing US state, and add these to the annotated locations data set.
   # Write out the new annotated file.
-  annotate(annotated, raw_mapped)
+  annotate(annotated, ts_to_raw)
   util.write_json_file(annotated, args.annotated)
 
 
@@ -52,63 +56,101 @@ def parse_args():
       help='Your email address. Required when using "osm" geocoder.')
   parser.add_argument('--limit', type=int,
       help='Limit reverse geocoding to to this many requests.')
+  parser.add_argument('--delete-changed', action='store_true',
+      help='Delete annotated entries that are changed in raw file')
+  parser.add_argument('--delete-missing', action='store_true',
+      help='Delete annotated entries that are missing in raw file')
   args = parser.parse_args()
 
 
 def map_by_timestamp(locations):
   """
-  Translate the location data into a dictionary whose keys are "datetime"
-  objects.  Each dictionary entry is the associated location data for that
-  timestamp.  Entries are inserted into the dictionary in the same order as
-  the entries in the location data.
+  Return two dictionaries whose keys are "datetime" objects.  The first
+  dictionary maps each timestamp to the associated location data for that
+  timestamp.  Entries are inserted into the dictionary in the same order as the
+  entries in the location data.  The second dictionary maps each timestamp to
+  the associated index in the location data list.
   """
-  mapped = {}
-  for entry in locations:
+  mapped_locations = {}
+  mapped_index = {}
+  for i in range(len(locations)):
+    entry = locations[i]
     ts = dateutil.parser.isoparse(entry['timestamp'])
-    mapped[ts] = entry
-  return mapped
+    mapped_locations[ts] = entry
+    mapped_index[ts] = i
+  return mapped_locations, mapped_index
 
 
-def validate(annotated_mapped, raw_mapped):
+def validate(ts_to_annotated, ts_to_raw, ts_to_annotated_index, annotated):
   """
   Check the annotated data to make sure it exists in the raw timeline data.
-  Raise an error if data is missing or if a timestamp's entry is different.
+  Print a diagnostic if data is missing or if a timestamp's entry is different.
+  Depending on the command line arguments, this diagnostic is either an error
+  or an informational message.  If requested in the command line arguments,
+  the missing / changed timestamp entries may be removed from the annotated
+  set.
   """
   missing = []
   changed = []
-  for ts, annotated_entry in annotated_mapped.items():
-    if ts not in raw_mapped:
+  for ts, annotated_entry in ts_to_annotated.items():
+    if ts not in ts_to_raw:
       missing.append(ts)
     else:
-      raw_entry = raw_mapped[ts]
+      raw_entry = ts_to_raw[ts]
       if (annotated_entry['latitudeE7'] != raw_entry['latitudeE7'] or
           annotated_entry['longitudeE7'] != raw_entry['longitudeE7'] or
           annotated_entry['accuracy'] != raw_entry['accuracy'] or
           annotated_entry['timestamp'] != raw_entry['timestamp']):
         changed.append(ts)
-  if missing:
+
+  # Diagnose an error if there are missing / changed entries and the command
+  # line arguments don't ask to delete them.
+  if missing and not args.delete_missing:
     print(f'ERROR: Annotated file contains {len(missing)} timestamp entries '
       'that are missing from raw file:')
     for ts in missing: print(f'  {ts}')
-  if changed:
+  if changed and not args.delete_changed:
     print(f'ERROR: Annotated file contains {len(changed)} timestamp entries '
       'that are different from raw file:')
     for ts in changed: print(f'  {ts}')
-  if missing or changed:
+  if ((missing and not args.delete_missing) or
+      (changed and not args.delete_changed)):
     sys.exit(1)
 
+  # If there are missing / changed entries at this point, the user has asked
+  # to delete them from the annotated list.  We must delete them in reverse
+  # order of their index in the list since deleting an entry changes the
+  # indices of the subsequent entries.
+  indices = []
+  if missing:
+    print(f'INFO: Removing {len(missing)} annotated entries that are missing '
+      'from raw file:')
+    for ts in missing:
+      print(f'  {ts}')
+      indices.append(ts_to_annotated_index[ts])
+      del ts_to_annotated[ts]
+  if changed:
+    print(f'INFO: Removing {len(changed)} annotated entries that are different '
+      'from raw file:')
+    for ts in changed:
+      print(f'  {ts}')
+      indices.append(ts_to_annotated_index[ts])
+      del ts_to_annotated[ts]
+  for i in sorted(indices, reverse=True):
+    del annotated['locations'][i]
 
-def trim(annotated_mapped, raw_mapped):
+
+def trim(ts_to_annotated, ts_to_raw):
   """
   Remove entries from the raw data which already exist in the annotated data,
   so that the raw data represents only those entries that need to be added to
   the annotated set.
   """
-  for ts in annotated_mapped.keys():
-    del raw_mapped[ts]
+  for ts in ts_to_annotated.keys():
+    del ts_to_raw[ts]
 
 
-def annotate(annotated, raw_mapped):
+def annotate(annotated, ts_to_raw):
   """
   Add entries from the raw data set to the annotated data set, using reverse
   geocoding to determine the US state that contains each coordinate.  Because
@@ -132,7 +174,7 @@ def annotate(annotated, raw_mapped):
 
   # Get the list of coordinates to reverse geocode.
   coords = []
-  for entry in raw_mapped.values():
+  for entry in ts_to_raw.values():
     lat = entry['latitudeE7'] / 1E7
     lon = entry['longitudeE7'] / 1E7
     coords.append((lat, lon))
@@ -140,19 +182,19 @@ def annotate(annotated, raw_mapped):
   if not coords:
     return
 
-  if len(raw_mapped) > len(coords):
-    print(f'INFO: Annotating {len(coords)} of {len(raw_mapped)} entries.')
+  if len(ts_to_raw) > len(coords):
+    print(f'INFO: Annotating {len(coords)} of {len(ts_to_raw)} entries.')
   else:
     print(f'INFO: Annotating {len(coords)} entries.')
 
   states = geocode(coords, annotated['geocoder'])
-  if len(states) < len(raw_mapped):
-    remaining = len(raw_mapped) - len(states)
+  if len(states) < len(ts_to_raw):
+    remaining = len(ts_to_raw) - len(states)
     print(f'INFO: There are still {remaining} entries not annotated yet.')
 
   # Append entries to the "annotated" data, including the reverse geocoded
   # state.
-  for state, (raw_entry) in zip(states, raw_mapped.values()):
+  for state, (raw_entry) in zip(states, ts_to_raw.values()):
     entry = {
       'timestamp': raw_entry['timestamp'],
       'latitudeE7': raw_entry['latitudeE7'],
