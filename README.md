@@ -27,7 +27,7 @@ This utility can be run like:
 
 ```
 $ python annotate.py -r <raw-file> -a <annotated-file> [--geocoder <service>] \
-  [--email <email>] [--limit <number>]
+  [--email <email>] [--limit <number>] [--delete-changed] [--delete-missing]
 ```
 
 The `<raw-file>` is the pathname to the JSON file downloaded from Google
@@ -43,6 +43,18 @@ downloaded raw JSON file.  The utilility will compare the content from
 `<raw-file>` to the content from `<annotated-file>` and identify the new
 location data.  The utility then annotates only this new data and updates
 `<annotated-file>`.
+
+When you run "annotate.py" a second (or subsequent) time, it may identify old
+entries from `<annotated-file>` that are no longer in the new `<raw-file>` or
+old entries from `<annotated-file>` that have changed in the new `<raw-file>`.
+This can happen if Google decides to delete or change some historical data from
+your timeline.  In this case you can use either the `--delete-changed` or
+`--delete-missing` options.  The `--delete-changed` option removes all entries
+from `<annotated-file>` that are different in `<raw-file>`.  As a result, those
+entries from `<raw-file>` are annotated and added to `<annotated-file>` thus
+replacing the previous annotated entries.  The `--delete-missing` option
+removes entries from `<annotated-file>` that are missing in `<raw-file>`.  As a
+result, those entries are removed from your geolocation history.
 
 The `--geocoder` option allows you to select a reverse geocoding service to
 translate the latitude / longitude coordinates to a US state.  The default
