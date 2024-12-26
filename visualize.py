@@ -35,9 +35,6 @@ def parse_args():
       help='Annotated JSON file.')
   parser.add_argument('-o', '--output', required=True,
       help='Output CSV file.')
-  parser.add_argument('--accuracy', default=800, type=int,
-      help='Skip location entries whose "accuracy" is greater than this '
-        'threshold. Zero means do not skip any entries.')
   args = parser.parse_args()
 
 
@@ -48,36 +45,44 @@ def summarize(annotated):
   timestamp entries in that state for that day.
   """
   summary = {}
-  inaccurate_count = 0
   last_day = None
   eastern = pytz.timezone('US/Eastern')
-  for entry in annotated['locations']:
-    # Since NY is in the Eastern timezone, get the day of this entry in that
-    # timezone.
-    ts = dateutil.parser.isoparse(entry['timestamp'])
-    tsEastern = ts.astimezone(eastern)
-    day = tsEastern.date()
+  for rec in annotated:
+    # Since NY is in the Eastern timezone, get the start time of this record in
+    # that timezone.
+    start = dateutil.parser.isoparse(rec['startTime'])
+    startEastern = start.astimezone(eastern)
 
-    # Create empty entries for any missing days from the annotated data.
-    if last_day and last_day < day:
-      last_day += datetime.timedelta(days=1)
-      while last_day < day:
-        summary[last_day] = {}
+    for tlrec in rec['timelinePath']:
+      # Get the date for this point.
+      offset = int(tlrec['durationMinutesOffsetFromStartTime'])
+      pointTime = startEastern + datetime.timedelta(minutes=offset)
+      day = pointTime.date()
+
+      # Create empty entries for any missing days from the annotated data.
+      if last_day and last_day < day:
         last_day += datetime.timedelta(days=1)
+        while last_day < day:
+          summary[last_day] = {}
+          last_day += datetime.timedelta(days=1)
 
-    if args.accuracy and entry['accuracy'] > args.accuracy:
-      inaccurate_count += 1
-    else:
+      # If this day / state does not exist in the summary, add it.  Otherwise,
+      # increment the count for this day / state by one.
       if day not in summary:
         summary[day] = {}
-      state = entry['state']
+      state = tlrec['state']
       if not state in summary[day]:
         summary[day][state] = 0
       summary[day][state] += 1
-    last_day = day
+      last_day = day
 
-  if inaccurate_count:
-    print(f'INFO: Skipped {inaccurate_count} inaccurate entries.')
+      # Midnight is the first moment of the next day, but this might be hard
+      # to explain to a tax authority.  To be conservative, treat a point at
+      # exactly midnight as residency in the previous day also.
+      if util.is_midnight(pointTime):
+        day = day - datetime.timedelta(days=1)
+        summary[day][state] += 1
+
   return summary
 
 

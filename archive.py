@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import dateutil.parser
 import pathlib
 import pytz
@@ -15,8 +16,8 @@ def main():
 
   # Get subsets of the input data containing only the location entries that
   # are in the requested tax year.
-  raw_archive = get_archived_raw(raw)
-  annotated_archive = get_archived_annotated(annotated)
+  raw_archive = get_archived(raw)
+  annotated_archive = get_archived(annotated)
 
   # Write the subsetted data as the archive files.
   write_output(raw_archive, annotated_archive)
@@ -56,39 +57,27 @@ def parse_args():
     args.begin = args.year
     args.end = args.year
 
-def get_archived_raw(raw):
-  """
-  Return a subset of the raw data containing only timestamp entries that fall
-  within the requested tax year.
-  """
-  locations = get_archived_locations(raw['locations'])
-  return {'locations': locations}
 
-
-def get_archived_annotated(annotated):
+def get_archived(records):
   """
-  Return a subset of the annotated data containing only timestamp entries that
-  fall within the requested tax year.
-  """
-  locations = get_archived_locations(annotated['locations'])
-  return {
-    'geocoder': annotated['geocoder'],
-    'locations': locations
-  }
-
-
-def get_archived_locations(locations):
-  """
-  Return a subset of the locations data containing only timestamp entries that
-  fall within the requested tax year.
+  Return a subset of the timeline records whose time range falls within the
+  requested tax year(s).  This works for either the raw or annotated JSON files.
   """
   archived = []
   eastern = pytz.timezone('US/Eastern')
-  for entry in locations:
-    ts = dateutil.parser.isoparse(entry['timestamp'])
-    tsEastern = ts.astimezone(eastern)
-    if (tsEastern.year >= args.begin) and (tsEastern.year <= args.end):
-      archived.append(entry)
+  beginPeriod = datetime.datetime(args.begin, 1, 1, tzinfo=eastern)
+  endPeriod = datetime.datetime(args.end+1, 1, 1, tzinfo=eastern)
+
+  for rec in records:
+    if 'startTime' in rec and 'endTime' in rec:
+      start = dateutil.parser.isoparse(rec['startTime']).astimezone(eastern)
+      end = dateutil.parser.isoparse(rec['endTime']).astimezone(eastern)
+
+      # To be conservative, assume that midnight between December 31 and
+      # January 1 is part of both years.  A point in NY on exactly midnight
+      # will count as residency in NY for both days.
+      if end >= beginPeriod and start <= endPeriod:
+        archived.append(rec)
   return archived
 
 

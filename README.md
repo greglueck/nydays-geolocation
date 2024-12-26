@@ -1,14 +1,14 @@
 # nydays-geolocation
 
 This project contains a set of utilities that correlate geolocation data from
-Google "location history" to US states.  The intent is to use the geolocation
-data to help identify days spent in NY state for tax purposes, but much of the
-logic in the utilities could be used to identify days spent in any US state.
+Google's Timeline to US states.  The intent is to use the geolocation data to
+help identify days spent in NY state for tax purposes, but much of the logic
+in the utilities could be used to identify days spent in any US state.
 
-The utilities assume you have enabled Google "location history" on a mobile
-device and have downloaded the data in JSON format via Google takeout.  We
-refer to this downloaded file as the "raw JSON file".  Once you have this raw
-JSON file, you can use the following utilities.
+The utilities assume you have enabled Google Timeline on a mobile device and
+have exported the Timeline data to a JSON file.  We refer to this downloaded
+file as the "raw JSON file".  Once you have this raw JSON file, you can use
+the following utilities.
 
 ## Utility Scripts
 
@@ -27,34 +27,22 @@ This utility can be run like:
 
 ```
 $ python annotate.py -r <raw-file> -a <annotated-file> [--geocoder <service>] \
-  [--email <email>] [--limit <number>] [--delete-changed] [--delete-missing]
+  [--email <email>] [--limit <number>]
 ```
 
-The `<raw-file>` is the pathname to the JSON file downloaded from Google
-takeout, and the `<annotated-file>` is the pathname to the annotated JSON file
+The `<raw-file>` is the pathname to the JSON file exported from Google
+Timeline, and the `<annotated-file>` is the pathname to the annotated JSON file
 which the utility either creates or updates.  The first time you run this
 utility, it creates an annotated file with data from the raw file.  The
 expectation is that you save the annotated file and periodically update it as
 you collect more location data on your mobile device.
 
-After your mobile device collects more location data, you can download it via
-Google takeout and run the "annotate.py" utility again with the newly
-downloaded raw JSON file.  The utilility will compare the content from
+After your mobile device collects more location data, you can export the
+Timeline data again and run the "annotate.py" utility again with the newly
+exported raw JSON file.  The utilility will compare the content from
 `<raw-file>` to the content from `<annotated-file>` and identify the new
 location data.  The utility then annotates only this new data and updates
 `<annotated-file>`.
-
-When you run "annotate.py" a second (or subsequent) time, it may identify old
-entries from `<annotated-file>` that are no longer in the new `<raw-file>` or
-old entries from `<annotated-file>` that have changed in the new `<raw-file>`.
-This can happen if Google decides to delete or change some historical data from
-your timeline.  In this case you can use either the `--delete-changed` or
-`--delete-missing` options.  The `--delete-changed` option removes all entries
-from `<annotated-file>` that are different in `<raw-file>`.  As a result, those
-entries from `<raw-file>` are annotated and added to `<annotated-file>` thus
-replacing the previous annotated entries.  The `--delete-missing` option
-removes entries from `<annotated-file>` that are missing in `<raw-file>`.  As a
-result, those entries are removed from your geolocation history.
 
 The `--geocoder` option allows you to select a reverse geocoding service to
 translate the latitude / longitude coordinates to a US state.  The default
@@ -73,15 +61,8 @@ show the number of location data entries on that day broken down by each US
 state.  Usage is like:
 
 ```
-$python visualize.py -a <annotated-file> -o <csv-file> [--accuracy <number>]
+$ python visualize.py -a <annotated-file> -o <csv-file>
 ```
-
-Each location entry in the raw data file contains an indication of the entry's
-accuracy.  The `--accuracy` option allows you to filter out location entries
-that are less accurate.  The default setting shows only the entries that are
-very accurate (an accuracy value of 800 or less).  Specify a larger value to
-display more entries or specify `--accuracy 0` to disable the filter and
-display all entries.
 
 ### check.py
 
@@ -95,13 +76,11 @@ that day, the utility will flag this as an error.
 Usage is like:
 
 ```
-$ python check.py -a <annotated-file> -w <workbook> -s <sheet> \
-  [--accuracy <number>]
+$ python check.py -a <annotated-file> -w <workbook> -s <sheet>
 ```
 
 The `workbook` specifies the pathname of the Excel workbook file, and
-`<sheet>` is the name of the spreadsheet in that workbook.  The `--accuracy`
-option causes the utility to ignore location entries that are less accurate.
+`<sheet>` is the name of the spreadsheet in that workbook.
 
 The spreadsheet is assumed to have a specific format, where the data starts
 on row 4:
@@ -129,8 +108,7 @@ of years.  Usage is like:
 
 ```
 $ python archive.py -r <raw-file> -a <annotated-file> \
-  [-y <year> | -b <begin> -e <end>] \
-  -n <name> -o <output-directory>
+  [-y <year> | -b <begin> -e <end>]  -n <name> -o <output-directory>
 ```
 
 The `<raw-file>` and `<annotated-file>` specify the pathnames to the raw and
@@ -157,76 +135,90 @@ so all the utility scripts can also be run on these archived files.
 
 ## Formats of the raw and annotated JSON files
 
-The raw and annotated JSON files have similar formats.  The raw file looks
-like this:
+The raw and annotated JSON files have similar formats.  The raw file is a list
+of records (dictionaries), where each record has `"startTime"` and `"endTime"`
+fields telling the time range for data in that record.  The remaining fields
+depend on the type of record.  The scripts in this project only use the records
+with this format:
 
 ```
 {
-  "locations": [{
-    "latitudeE7": <integer>,
-    "longitudeE7": <integer>,
-    "accuracy": <integer>,
-    "timestamp": <string>
-    /* other entries */
-  },
-  ...
+  "startTime": "2023-01-02T18:00:00.000Z",
+  "endTime": "2023-01-02T20:00:00.000Z",
+  "timelinePath": [
+    {
+      "durationMinutesOffsetFromStartTime": "74",
+      "point": "geo:40.756212,-73.967541"
+    },
+    ...
   ]
-}
+},
+{
+  "startTime": "2023-01-02T20:00:00.000Z",
+  "endTime": "2023-01-02T22:00:00.000Z",
+  "timelinePath": [
+    {
+      "durationMinutesOffsetFromStartTime": "7",
+      "point": "geo:40.766989,-73.972554"
+    },
+    ...
+  ]
+},
+...
 ```
 
-The annotated file adds "geocoder" and "state" fields:
+The raw  JSON file has many of these records, sorted by their `"startTime"`.
+Each record contains a list of `"timelinePath"` entries, where each of those
+entries describes one geolocation point.
+
+`"startTime"`: The starting time for geolocation points in this record.  This
+field is a timestamp in [ISO-8601][1] format.
+
+`"endTime"`: The ending time for geolocaiton points in this record.  This field
+is also a timestamp in [ISO-8601][1] format.
+
+`"timelinePath"`: A list of geolocation point records.
+
+`"durationMinutesOffsetFromStartTime"`: The offset (in minutes) from
+`"startTime"` for this geolocation point.
+
+`"point"`: The latitude and longitude for this geolocation point.  The mobile
+device was at this location at the timestamp specified by `startTime +
+durationMinutesOffsetFromStartTime`.
+
+The annotated file adds `"geocoder"` and `"state"` fields to each of the
+`"timelinePath"` records like this:
 
 ```
 {
-  "geocoder": <string>,
-  "locations": [{
-    "latitudeE7": <integer>,
-    "longitudeE7": <integer>,
-    "accuracy": <integer>,
-    "timestamp": <string>,
-    "state": <string>
-  },
-  ...
+  "startTime": "2023-01-02T18:00:00.000Z",
+  "endTime": "2023-01-02T20:00:00.000Z",
+  "timelinePath": [
+    {
+      "durationMinutesOffsetFromStartTime": "74",
+      "point": "geo:40.756212,-73.967541",
+      "geocoder": "osm",
+      "state": "NY"
+    },
+    ...
   ]
-}
+},
+...
 ```
 
-The meaning of each field is as follows:
+`"geocoder"`: A string telling the geocoding service that was used to reverse
+geocode the `"point"` coordinates.  Possible values are:
 
-* `"geocoder"`: A string telling the geocoding service that was used to reverse
-  geocode the location data in the annotated JSON file.  Possible values are:
+* `"local"`: The Python package "reverse_geocoder", which runs locally.
+* `"osm"`: The Nominatim web service from openstreetmap.org.
 
-  - `"local"`: The Python package "reverse_geocoder", which runs locally.
-  - `"osm"`: The Nominatim web service from openstreetmap.org.
-
-* `"locations"`: Google location history periodically records an entry telling
-  the location of your mobile device.  These entries are sorted by increasing
-  timestamp.
-
-* `"latitudeE7"`: An integer telling the latitude of the location.  The value
-  is the latitude multiplied by 1E7.
-
-* `"longitudeE7"`: An integer telling the longitude of the location.  The value
- is the longitude multiplied by 1E7.
-
-* `"accuracy"`: The approximate accuracy of the location in meters.  A smaller
-  value indicates higher accuracy.
-
-* `"timestamp"`: The time at which the entry was recorded, a string in
-  [ISO-8601][1] format.
-
-* `"state"`: A string telling the US state that contains this location entry.
-  The values follow the 2-letter [USPS abbreviations][2] for the 50 US states
-  plus the District of Columbia.  The value "EX" indicates a location that is
-  outside of the US.
-
-The `"latitudeE7"`, `"longitudeE7"`, `"accuracy"`, and `"timestamp"` fields
-come directly from the raw Google takeout data, which is documented more fully
-[here][3].
+`"state"`: A string telling the US state that contains the `"point"`
+coordinates.  The values follow the 2-letter [USPS abbreviations][2] for the
+50 US states plus the District of Columbia.  The value "EX" indicates a
+location that is outside of the US.
 
 [1]: <https://en.wikipedia.org/wiki/ISO_8601>
 [2]: <https://about.usps.com/who-we-are/postal-history/state-abbreviations.htm>
-[3]: <https://locationhistoryformat.com/reference/records/>
 
 
 ## Development Utilities

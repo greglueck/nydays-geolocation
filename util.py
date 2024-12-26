@@ -20,3 +20,13 @@ def write_json_file(data, filename):
   except IOError:
     print(f'ERROR: Unable to write file "{filename}".')
     sys.exit(1)
+
+
+def is_midnight(time):
+  """
+  Given a datetime in NY timezone, return True if it is exactly midnight.
+  """
+  if time.hour == 0 and time.minute == 0 and \
+     time.second == 0 and time.microsecond == 0:
+    return True
+  return False

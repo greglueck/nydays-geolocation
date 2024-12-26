@@ -18,9 +18,8 @@ def main():
   # Boolean telling whether the day is a "NY day".
   ny_days = get_ny_days(ws)
 
-  # Create a dictionary that maps each day to the annotated entries for that
-  # day.
-  mapped = map_days_to_entries(annotated)
+  # Create a dictionary that maps each day to the set of states for that day.
+  mapped = map_days_to_states(annotated)
 
   # Check the dictionary against the location data to see if any non-NY day
   # was actually spent in NY.
@@ -39,9 +38,6 @@ def parse_args():
       help='Excel workbook with NY Days spreadsheet.')
   parser.add_argument('-s', '--sheet', required=True,
       help='Name of NY Days spreadsheet within workbook.')
-  parser.add_argument('--accuracy', default=800, type=int,
-      help='Skip location entries whose "accuracy" is greater than this '
-        'threshold. Zero means do not skip any entries.')
   args = parser.parse_args()
 
 
@@ -88,21 +84,37 @@ def get_ny_days(ws):
   return ny_days
 
 
-def map_days_to_entries(annotated):
+def map_days_to_states(annotated):
   """
-  Create a dictionary from the annotated timestamp entries.  Each key is a "date" 
-  object representing a day in NY timezone, and each value is a list of the
-  annotated entries for that day.
+  Create a dictionary from the annotated records.  Each key is a "date"
+  object representing a day in NY timezone, and each value is a set of the
+  states for that day.
   """
   mapped = {}
   eastern = pytz.timezone('US/Eastern')
-  for entry in annotated['locations']:
-    ts = dateutil.parser.isoparse(entry['timestamp'])
-    tsEastern = ts.astimezone(eastern)
-    day = tsEastern.date()
-    if not day in mapped:
-      mapped[day] = []
-    mapped[day].append(entry)
+  for rec in annotated:
+    start = dateutil.parser.isoparse(rec['startTime'])
+    startEastern = start.astimezone(eastern)
+
+    for tlrec in rec['timelinePath']:
+      # Get the date for this point.
+      offset = int(tlrec['durationMinutesOffsetFromStartTime'])
+      pointTime = startEastern + datetime.timedelta(minutes=offset)
+      day = pointTime.date()
+
+      if not day in mapped:
+        mapped[day] = set()
+      mapped[day].add(tlrec['state'])
+
+      # Midnight is the first moment of the next day, but this might be hard
+      # to explain to a tax authority.  To be conservative, treat a point at
+      # exactly midnight as residency in the previous day also.
+      if util.is_midnight(pointTime):
+        day = day - datetime.timedelta(days=1)
+        if not day in mapped:
+          mapped[day] = set()
+        mapped[day].add(tlrec['state'])
+
   return mapped
 
 
@@ -114,32 +126,17 @@ def check(ny_days, mapped):
   """
   warn = []
   err = []
-  inaccurate_count = 0
   for day, in_ny in ny_days.items():
     if in_ny: continue
 
-    # Create a list of the accurate timestamp entries for this day.
-    accurate = []
-    if day in mapped:
-      for entry in mapped[day]:
-        if args.accuracy and entry['accuracy'] > args.accuracy:
-          inaccurate_count += 1
-        else:
-          accurate.append(entry)
-
-    # A non-NY day with no location data is a warning.
-    if not accurate:
-      warn.append(day)
-      continue
-
     # A non-NY day with a location in NY is an error.
-    for entry in accurate:
-      if entry['state'] == 'NY':
+    # A non-NY day with no location data is a warning.
+    if day in mapped:
+      if 'NY' in mapped[day]:
         err.append(day)
-        break
+    else:
+      warn.append(day)
 
-  if inaccurate_count:
-    print(f'INFO: Skipped {inaccurate_count} inaccurate entries.')
   if warn:
     print(f'WARNING: No location data for {len(warn)} non-NY days:')
     print_days('  ', warn)
