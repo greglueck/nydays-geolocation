@@ -27,7 +27,7 @@ This utility can be run like:
 
 ```
 $ python annotate.py -r <raw-file> -a <annotated-file> [--geocoder <service>] \
-  [--email <email>] [--limit <number>]
+  [--email <email>] [--limit <number>] [--use-cache <annotated-file>]
 ```
 
 The `<raw-file>` is the pathname to the JSON file exported from Google
@@ -53,6 +53,15 @@ which runs remotely.  This is much slower but also more accurate.  Using the
 service may reject requests if you exceed their terms of use.  The `--limit`
 option may be useful to avoid exceeding these limits, allowing you to annotate
 the `<raw-file>` piecemeal with several runs of the utility.
+
+Because the reverse geocoding service may be slow, it helps to avoid making
+redundant geocoding requests for coordinates that have been previously mapped
+to a US state.  The `--use-cache` option provides a way to use the contents of
+another annotated file to avoid these redundant geocoding requests.  If the
+coordinates in the `<raw-file>` have already been mapped to a US state in the
+`--use-cache` file, then the state from the `--use-cache` file is used instead
+of making a new geocoding request.  The `--use-cache` option may be passed
+multiple times if you have several other annotated files.
 
 ### visualize.py
 
