@@ -2,12 +2,21 @@ import json
 import sys
 
 
-def read_json_file(filename):
-  """Read a JSON file and return its data.  Exit on error."""
+def read_json_file(filename, default=None):
+  """
+  Read a JSON file and return its data.  Exit on error.
+  If the file does not exist, the behavior depends on "default".  If "default"
+  is None, exits with an error.  Otherwise, "default" is returned when the file
+  does not exist.
+  """
   try:
     with open(filename) as f:
       return json.load(f)
-  except IOError:
+  except FileNotFoundError:
+    if default != None:
+      return default
+    print(f'ERROR: File "{filename}" does not exist.')
+  except OSError:
     print(f'ERROR: Unable to read file "{filename}".')
     sys.exit(1)
 
@@ -17,7 +26,7 @@ def write_json_file(data, filename):
   try:
     with open(filename, 'w') as f:
       json.dump(data, f, sort_keys=True, indent=2)
-  except IOError:
+  except OSError:
     print(f'ERROR: Unable to write file "{filename}".')
     sys.exit(1)
 
