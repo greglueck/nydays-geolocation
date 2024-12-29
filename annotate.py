@@ -52,7 +52,7 @@ def main():
 
   # Create annotated records for the new raw records, then write out the
   # annotated data.
-  annotate(raw_timeline, annotated, cache)
+  annotated = annotate(raw_timeline, annotated, cache)
   util.write_json_file(annotated, args.annotated)
 
 
@@ -212,42 +212,48 @@ def validate_annotated_against_raw(raw, annotated):
   """
   Make sure the existing annotated records still match their corresponding raw
   records.  This validates that the raw records didn't change since they were
-  last annotated.
+  last annotated.  Specifically, it checks that:
+
+  - Each of the annotated records still exists in the raw timeline.
+  - The raw records that match the annotated records have the same order in
+    both lists.
+
+  Raise an error and exit if these checks fail.
   """
-  irec = 0
-  for rrec, arec in zip(raw, annotated):
-    # Make sure the start and end times didn't change.
-    if rrec['startTime'] != arec['startTime']:
-      print(f'ERROR: Annotated start time mismatch: {arec["startTime"]}')
-      sys.exit(1)
-    if rrec['endTime'] != arec['endTime']:
-      print(f'ERROR: Annotated end time mismatch: {arec["endTime"]}')
-      sys.exit(1)
-
-    # The number of "points" in each record should not change.  However,
-    # new "points" may have been added to the last raw record since it was
-    # last annotated, so the last annotated record may have fewer points than
-    # its associatd raw record.
-    if irec < len(annotated)-1:
-      mismatch = (len(rrec['timelinePath']) != len(arec['timelinePath']))
-    else:
-      mismatch = (len(rrec['timelinePath']) < len(arec['timelinePath']))
-    if mismatch:
-      print(f"ERROR: Annotated timeline count mismatch:")
-      print(f'       Start time: {arec["startTime"]}')
+  iraw = 0
+  for arec in annotated:
+    # Make sure each annotated start / end record exists in the raw timeline.
+    astart = arec['startTime']
+    aend = arec['endTime']
+    while iraw < len(raw) and \
+          raw[iraw]['startTime'] != astart and \
+          raw[iraw]['endTime'] != aend:
+      iraw += 1
+    if iraw >= len(raw):
+      print(f'ERROR: Annotated record missing from raw:')
+      print(f'       start = {astart}')
+      print(f'       end   = {aend}')
       sys.exit(1)
 
-    # Make sure each "point" did not change.
-    for rtlrec, atlrec in zip(rrec['timelinePath'], arec['timelinePath']):
-      if rtlrec['point'] != atlrec['point']:
-        print(f'ERROR: Annotated point mismatch: {atlrec["point"]}')
-        print(f'       Start time: {arec["startTime"]}')
+    # Make sure each annotated point in this annotated record exists in the raw
+    # timeline.
+    rrec = raw[iraw]
+    atimeline = arec['timelinePath']
+    rtimeline = rrec['timelinePath']
+    irpoint = 0
+    for atlrec in atimeline:
+      apoint = atlrec['point']
+      aoff = atlrec['durationMinutesOffsetFromStartTime']
+      while irpoint < len(rtimeline) and \
+            rtimeline[irpoint]['point'] != apoint and \
+            rtimeline[irpoint]['durationMinutesOffsetFromStartTime'] != aoff:
+        irpoint += 1
+      if irpoint >= len(rtimeline):
+        print(f'ERROR: Annotated point missing from raw:')
+        print(f'       start  = {astart}')
+        print(f'       offset = {aoff}')
+        print(f'       point  = {apoint}')
         sys.exit(1)
-      if rtlrec['durationMinutesOffsetFromStartTime'] != atlrec['durationMinutesOffsetFromStartTime']:
-        print(f'ERROR: Annotated offset mismatch: {atlrec["durationMinutesOffsetFromStartTime"]}')
-        print(f'       Start time: {arec["startTime"]}')
-        sys.exit(1)
-    irec += 1
 
 
 def add_annotated_to_cache(annotated, cache):
@@ -271,42 +277,94 @@ def add_annotated_to_cache(annotated, cache):
 
 def annotate(raw, annotated, cache):
   """
-  Add records from the raw timeline to the annotated timeline, using reverse
-  geocoding to determine the US state that contains each coordinate.  Because
-  some reverse geocoding services have a daily limit on the number of requests,
-  some raw records might not be added to the annotated timeline.  If this
-  happens, an info message is printed.
+  Find records from the raw timeline that do not exist in the annotated
+  timeline, and annotated them using reverse geocoding to determine the US
+  state that contains each coordinate.  Because some reverse geocoding
+  services have a daily limit on the number of requests, some raw records
+  might not be added to the annotated timeline.  If this happens, an info
+  message is printed.
+
+  Returns a new list of annotated records.
   """
 
-  # Get the index of the first record to annotate.  This is the first raw
-  # record that does not have a corresponding annotated record.
-  if not len(annotated):
-    irec_first = 0
-    itlrec_first = 0
-  else:
-    irec_first = len(annotated)-1
-    itlrec_first = len(annotated[irec_first]['timelinePath'])
-    if itlrec_first >= len(raw[irec_first]['timelinePath']):
-      irec_first += 1
-      itlrec_first = 0
-
-  # Create a list of all the "points" that need to be annotated.
+  # This will become the list of points from the raw timeline that do not exist
+  # in the annotated timeline.
   points = []
-  irec = irec_first
-  itlrec = itlrec_first
-  while irec < len(raw):
-    rec = raw[irec]
-    tlrec = rec['timelinePath'][itlrec]
-    points.append(tlrec['point'])
-    itlrec += 1
-    if itlrec >= len(rec['timelinePath']):
-      irec += 1
-      itlrec = 0
+
+  # Loop through the annotated timeline records and match them against their
+  # corresponding raw timeline records.  Those records in the raw timeline that
+  # do not have a match are newly added and must be annotated.
+  #
+  # It appears that when a new raw timeline is exported, Google may add new
+  # records even for older timestamps.  As a result, we may find new raw
+  # records that need to be annotated anywhere in the timeline, not just at the
+  # end.
+  #
+  # The algorithm below assumes that:
+  #   - All the annotated timeline records have some match in the raw timeline,
+  #   - The order of the annotated records is the same in the raw timeline.
+  iraw = 0
+  for arec in annotated:
+    astart = arec['startTime']
+    aend = arec['endTime']
+
+    # If this annotated start/end record does not match the next raw record,
+    # then all the points in the raw "timelinePath" are newly added.
+    while iraw < len(raw) and \
+          (raw[iraw]['startTime'] != astart or \
+           raw[iraw]['endTime'] != aend):
+      rraw = raw[iraw]
+      for rtlrec in rraw['timelinePath']:
+        points.append(rtlrec['point'])
+      iraw += 1
+
+    # The start/end times of the annotated and raw records match.  Loop through
+    # the points in the record's timeline path and compare those.
+    rrec = raw[iraw]
+
+    atimeline = arec['timelinePath']
+    rtimeline = rrec['timelinePath']
+    irpoint = 0
+    for atlrec in atimeline:
+      apoint = atlrec['point']
+      aoff = atlrec['durationMinutesOffsetFromStartTime']
+
+      # If this annotated point does not match the next raw point, the raw
+      # point is newly added.
+      while irpoint < len(rtimeline) and \
+            (rtimeline[irpoint]['point'] != apoint or \
+             rtimeline[irpoint]['durationMinutesOffsetFromStartTime'] != aoff):
+        rtlrec = rtimeline[irpoint]
+        points.append(rtlrec['point'])
+        irpoint += 1
+
+      # Advance to the next raw point.
+      irpoint += 1
+
+    # We've matched all the annotated points in this record.  If there are
+    # still more raw points, they are newly added.
+    while irpoint < len(rtimeline):
+      rtlrec = rtimeline[irpoint]
+      points.append(rtlrec['point'])
+      irpoint += 1
+
+    # Advance to the next raw record.
+    iraw += 1
+
+  # We've matched all the annotated records.  If there are additional raw
+  # records, they are newly added.
+  while iraw < len(raw):
+    rraw = raw[iraw]
+    for rtlrec in rraw['timelinePath']:
+      points.append(rtlrec['point'])
+    iraw += 1
 
   if not points:
     print(f'INFO: Nothing to annotate.')
-    return
+    return annotated
 
+  # If the total number of points to annotated is greater than the command
+  # line limit, pare it back.
   total_points = len(points)
   if args.limit and len(points) > args.limit:
     print(f'INFO: Annotating {args.limit} of {len(points)} entries.')
@@ -321,32 +379,133 @@ def annotate(raw, annotated, cache):
     remaining = total_points - len(states)
     print(f'INFO: There are still {remaining} entries not annotated yet.')
 
-  # Create a new annotated record for each point that we reverse geocoded.
-  irec = irec_first
-  itlrec = itlrec_first
-  for state in states:
-    rrec = raw[irec]
-    rtlrec = rrec['timelinePath'][itlrec]
-    if irec < len(annotated):
-      arec = annotated[irec]
-    else:
-      arec = {
-        'endTime': rrec['endTime'],
-        'startTime': rrec['startTime'],
+  # It's more efficient to create a new list of annotated records by pushing
+  # things onto the end rather than inserting new elements in the middle of
+  # the existing list.
+  annotated_new = []
+
+  # The loop below pops elements off the "states" list as we add them to the
+  # new annotated list.  This is more efficient if we pop the elements off the
+  # end, so reverse the list.
+  states.reverse()
+
+  # This is basically the same loop over annotated records we did above.  As
+  # we find raw records that have no matching annotated record, we pop a state
+  # off the "states" list and use that to create a new annotated record.  As we
+  # do this, be careful that the "states" list may be shorter than the total
+  # number of raw records that need to be annotated.  When the "states" list
+  # becomes empty, any remaining unannotated raw records remain unannotated.
+  iraw = 0
+  for arec in annotated:
+    astart = arec['startTime']
+    aend = arec['endTime']
+
+    # If this annotated start/end record does not match the next raw record,
+    # then all the points in the raw "timelinePath" are newly added.  Create
+    # annotated records for each of these points.
+    while iraw < len(raw) and \
+          (raw[iraw]['startTime'] != astart or \
+           raw[iraw]['endTime'] != aend):
+      rraw = raw[iraw]
+      arec_new = {
+        'startTime': rraw['startTime'],
+        'endTime': rraw['endTime'],
         'timelinePath': []
-        }
-      annotated.append(arec)
-    atlrec = {
-      'point': rtlrec['point'],
-      'durationMinutesOffsetFromStartTime': rtlrec['durationMinutesOffsetFromStartTime'],
-      'geocoder': args.geocoder,
-      'state': state
       }
-    arec['timelinePath'].append(atlrec)
-    itlrec += 1
-    if itlrec >= len(rrec['timelinePath']):
-      irec += 1
-      itlrec = 0
+      for rtlrec in rraw['timelinePath']:
+        if len(states):
+          arec_new['timelinePath'].append({
+            'durationMinutesOffsetFromStartTime': rtlrec['durationMinutesOffsetFromStartTime'],
+            'point': rtlrec['point'],
+            'geocoder': args.geocoder,
+            'state': states.pop()
+          })
+      if len(arec_new['timelinePath']):
+        annotated_new.append(arec_new)
+      iraw += 1
+
+    # The start/end times of the annotated and raw records match.  Loop through
+    # the points in the record's timeline path and compare those.
+    rrec = raw[iraw]
+
+    atimeline = arec['timelinePath']
+    rtimeline = rrec['timelinePath']
+    atimeline_new = []
+    irpoint = 0
+    for atlrec in atimeline:
+      apoint = atlrec['point']
+      aoff = atlrec['durationMinutesOffsetFromStartTime']
+
+      # If this annotated point does not match the next raw point, the raw
+      # point is newly added, so we create an annotated point for it.
+      while irpoint < len(rtimeline) and \
+            (rtimeline[irpoint]['point'] != apoint or \
+             rtimeline[irpoint]['durationMinutesOffsetFromStartTime'] != aoff):
+        rtlrec = rtimeline[irpoint]
+        if len(states):
+          atimeline_new.append({
+            'durationMinutesOffsetFromStartTime': rtlrec['durationMinutesOffsetFromStartTime'],
+            'point': rtlrec['point'],
+            'geocoder': args.geocoder,
+            'state': states.pop()
+          })
+        irpoint += 1
+
+      # This annotated point matches the raw point; add it to the new list of
+      # annotated points and advance to the next raw point.
+      irpoint += 1
+      atimeline_new.append(atlrec)
+
+    # We've matched all the annotated points in this record.  If there are
+    # still more raw points, they are newly added.  Add annotated points for
+    # them.
+    while irpoint < len(rtimeline) and len(states):
+      rtlrec = rtimeline[irpoint]
+      atimeline_new.append({
+        'durationMinutesOffsetFromStartTime': rtlrec['durationMinutesOffsetFromStartTime'],
+        'point': rtlrec['point'],
+        'geocoder': args.geocoder,
+        'state': states.pop()
+      })
+      irpoint += 1
+
+    # We now have:
+    #   - "arec": the annotated start/end record that matches the current raw
+    #      record
+    #   - "atimeline_new": a new set of annotated points for this record.
+    # Add this annotated record to the new annotated list.
+    arec_new = {
+      'startTime': arec['startTime'],
+      'endTime': arec['endTime'],
+      'timelinePath': atimeline_new
+    }
+    annotated_new.append(arec_new)
+
+    # Advance to the next raw record.
+    iraw += 1
+
+  # We've matched all the annotated records at this point.  If there are
+  # additional start/end records in the raw timeline, they are newly added.
+  # Add new annotated records for them.
+  while iraw < len(raw) and len(states):
+    rraw = raw[iraw]
+    arec_new = {
+      'startTime': rraw['startTime'],
+      'endTime': rraw['endTime'],
+      'timelinePath': []
+    }
+    for rtlrec in rraw['timelinePath']:
+      if len(states):
+        arec_new['timelinePath'].append({
+          'durationMinutesOffsetFromStartTime': rtlrec['durationMinutesOffsetFromStartTime'],
+          'point': rtlrec['point'],
+          'geocoder': args.geocoder,
+          'state': states.pop()
+        })
+    annotated_new.append(arec_new)
+    iraw += 1
+
+  return annotated_new
 
 
 def geocode(points, geocoder, cache):
