@@ -226,8 +226,8 @@ def validate_annotated_against_raw(raw, annotated):
     astart = arec['startTime']
     aend = arec['endTime']
     while iraw < len(raw) and \
-          raw[iraw]['startTime'] != astart and \
-          raw[iraw]['endTime'] != aend:
+          (raw[iraw]['startTime'] != astart or \
+           raw[iraw]['endTime'] != aend):
       iraw += 1
     if iraw >= len(raw):
       print(f'ERROR: Annotated record missing from raw:')
@@ -245,8 +245,8 @@ def validate_annotated_against_raw(raw, annotated):
       apoint = atlrec['point']
       aoff = atlrec['durationMinutesOffsetFromStartTime']
       while irpoint < len(rtimeline) and \
-            rtimeline[irpoint]['point'] != apoint and \
-            rtimeline[irpoint]['durationMinutesOffsetFromStartTime'] != aoff:
+            (rtimeline[irpoint]['point'] != apoint or \
+             rtimeline[irpoint]['durationMinutesOffsetFromStartTime'] != aoff):
         irpoint += 1
       if irpoint >= len(rtimeline):
         print(f'ERROR: Annotated point missing from raw:')
