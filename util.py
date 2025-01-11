@@ -16,6 +16,7 @@ def read_json_file(filename, default=None):
     if default != None:
       return default
     print(f'ERROR: File "{filename}" does not exist.')
+    sys.exit(1)
   except OSError:
     print(f'ERROR: Unable to read file "{filename}".')
     sys.exit(1)
