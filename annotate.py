@@ -659,8 +659,9 @@ def geocode_osm(points, cache):
     if completed: print('')
     print('INFO: Interrupted from keyboard.')
 
-  pct = (cache_hits / completed) * 100
-  print(f'INFO: Cache avoided {cache_hits} osm requests ({pct:.0f}%)')
+  if completed:
+    pct = (cache_hits / completed) * 100
+    print(f'INFO: Cache avoided {cache_hits} osm requests ({pct:.0f}%)')
   return states
 
 
