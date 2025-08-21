@@ -129,14 +129,17 @@ $ python archive.py -r <raw-file> -a <annotated-file> \
 ```
 
 The `<raw-file>` and `<annotated-file>` specify the pathnames to the raw and
-annotated JSON files.  The year(s) to archive can either be specifed as a
+annotated JSON files.  The `-r` option can be repeated if there is more than
+one raw timeline file.  The year(s) to archive can either be specifed as a
 single `<year>` or as a range `<begin>` and `<end>`.  These values are
 numbers, for example `-b 2020 -e 2022` archives the location data coresponding
 to the days in years 2020 - 2022 (inclusive).
 
 The `<name>` is used to create the name of the output files, which are written
-to the `<output-directory>`.  Two output files are written, one for the raw
-JSON data and one for the annotated data, which have the following names:
+to the `<output-directory>`.  One output file is written for the annotated data,
+and one is written for each raw data file that has timestamp entries in the
+specified year(s).  When there is just one raw file, the files are named like
+this:
 
 * `<output-directory>`/geo-location-`<name>`-`<year>`-annotated.json
 * `<output-directory>`/geo-location-`<name>`-`<year>`-raw.json
@@ -145,6 +148,11 @@ or:
 
 * `<output-directory>`/geo-location-`<name>`-`<begin>`-`<end>`-annotated.json
 * `<output-directory>`/geo-location-`<name>`-`<begin>`-`<end>`-raw.json
+
+When there are multiple raw files, they are named with a numeric suffix like:
+
+* `<output-directory>`/geo-location-`<name>`-`<year>`-raw-1.json
+* `<output-directory>`/geo-location-`<name>`-`<year>`-raw-2.json
 
 The archived files have the same format as the input raw and annotated files,
 so all the utility scripts can also be run on these archived files.
