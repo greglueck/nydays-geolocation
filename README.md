@@ -44,6 +44,14 @@ exported raw JSON file.  The utilility will compare the content from
 location data.  The utility then annotates only this new data and updates
 `<annotated-file>`.
 
+If you get a new mobile device, you may find that the Timeline data from the new
+device does not contain data collected by the old device.  In this case, you
+can pass multiple `-r` options, each specifying the raw Timeline data from one
+of your mobile devices.  The "annotate.py" utility will annotate data from all
+raw files and create a single annotated file.  The order of the `-r` options is
+important.  Raw files with older Timeline data should be specified before raw
+files with newer data.
+
 The `--geocoder` option allows you to select a reverse geocoding service to
 translate the latitude / longitude coordinates to a US state.  The default
 uses a service that runs locally.  This runs quickly but may be less
