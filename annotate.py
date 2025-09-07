@@ -248,20 +248,24 @@ def validate_annotated_against_raw(raw, annotated):
 
   Raise an error and exit if these checks fail.
   """
+  err_count = 0
   iraw = 0
   for arec in annotated:
     # Make sure each annotated start / end record exists in the raw timeline.
     astart = arec['startTime']
     aend = arec['endTime']
-    while iraw < len(raw) and \
-          (raw[iraw]['startTime'] != astart or \
-           raw[iraw]['endTime'] != aend):
-      iraw += 1
-    if iraw >= len(raw):
+    iraw2 = iraw
+    while iraw2 < len(raw) and \
+          (raw[iraw2]['startTime'] != astart or \
+           raw[iraw2]['endTime'] != aend):
+      iraw2 += 1
+    if iraw2 >= len(raw):
       print(f'ERROR: Annotated record missing from raw:')
       print(f'       start = {astart}')
       print(f'       end   = {aend}')
-      sys.exit(1)
+      err_count += 1
+      continue
+    iraw = iraw2
 
     # Make sure each annotated point in this annotated record exists in the raw
     # timeline.
@@ -272,16 +276,23 @@ def validate_annotated_against_raw(raw, annotated):
     for atlrec in atimeline:
       apoint = atlrec['point']
       aoff = atlrec['durationMinutesOffsetFromStartTime']
-      while irpoint < len(rtimeline) and \
-            (rtimeline[irpoint]['point'] != apoint or \
-             rtimeline[irpoint]['durationMinutesOffsetFromStartTime'] != aoff):
-        irpoint += 1
-      if irpoint >= len(rtimeline):
+      irpoint2 = irpoint
+      while irpoint2 < len(rtimeline) and \
+            (rtimeline[irpoint2]['point'] != apoint or \
+             rtimeline[irpoint2]['durationMinutesOffsetFromStartTime'] != aoff):
+        irpoint2 += 1
+      if irpoint2 >= len(rtimeline):
         print(f'ERROR: Annotated point missing from raw:')
         print(f'       start  = {astart}')
         print(f'       offset = {aoff}')
         print(f'       point  = {apoint}')
-        sys.exit(1)
+        err_count += 1
+        continue
+      irpoint = irpoint2
+
+  if err_count:
+    print(f'INFO: {err_count} errors')
+    sys.exit(1)
 
 
 def add_annotated_to_cache(annotated, cache):
