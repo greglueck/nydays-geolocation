@@ -84,6 +84,14 @@ def parse_args():
       help='Limit reverse geocoding to to this many requests.')
   parser.add_argument('--use-cache', action='append',
       help='Input annotated file to use as geocode cache (may be repeated)')
+  parser.add_argument('--latitude-slack', type=float,
+      help='When comparing annotated geolocation points against the raw '
+        'timeline, consider the latitudes to match if they are within this '
+        'threshhold.')
+  parser.add_argument('--longitude-slack', type=float,
+      help='When comparing annotated geolocation points against the raw '
+        'timeline, consider the longitudes to match if they are within this '
+        'threshhold.')
   args = parser.parse_args()
 
 
@@ -162,6 +170,7 @@ def validate_raw(raw, raw_name, last_end_time):
         print(f'       Start: {rec["startTime"]}')
         sys.exit(1)
 
+      last_offset = None
       for tlrec in tlPath:
         if not isinstance(tlrec, dict):
           print(f'ERROR: Timeline path record not a dictionary:')
@@ -175,6 +184,15 @@ def validate_raw(raw, raw_name, last_end_time):
           print(f'ERROR: Timeline path record missing offset or not an int:')
           print(f'       File:  {raw_name}')
           print(f'       Start: {rec["startTime"]}')
+          sys.exit(1)
+
+        if offset < 0:
+          print(f'ERROR: Timeline point offset less than zero:')
+          print(f'       File:  {raw_name}')
+          print(f'       Start: {rec["startTime"]}')
+          print(f'       End:   {rec["endTime"]}')
+          print(f'       Point: {tlrec["durationMinutesOffsetFromStartTime"]}')
+          sys.exit(1)
 
         # Each record in the timeline path contains an offset (in minutes) from
         # the start time.  This offset must be within the [start, end] range.
@@ -191,12 +209,24 @@ def validate_raw(raw, raw_name, last_end_time):
           print(f'       Point: {tlrec["durationMinutesOffsetFromStartTime"]}')
           sys.exit(1)
 
+        # The offsets must be in sorted order.  Multiple entries with the same
+        # offset are allowed.
+        if last_offset and offset < last_offset:
+          print(f'ERROR: Timeline point time not sorted:')
+          print(f'       File:  {raw_name}')
+          print(f'       Start: {rec["startTime"]}')
+          print(f'       End:   {rec["endTime"]}')
+          print(f'       Point: {tlrec["durationMinutesOffsetFromStartTime"]}')
+          sys.exit(1)
+        last_offset = offset
+
         if 'point' not in tlrec:
           print(f'ERROR: Timeline path record missing coordinates:')
           print(f'       File:  {raw_name}')
           print(f'       Start: {rec["startTime"]}')
           print(f'       End:   {rec["endTime"]}')
           print(f'       Point: {tlrec["durationMinutesOffsetFromStartTime"]}')
+          sys.exit(1)
         m = re.fullmatch(rePoint, tlrec['point'])
         if not m:
           print(f'ERROR: Timeline point has unexpected format:')
@@ -204,6 +234,7 @@ def validate_raw(raw, raw_name, last_end_time):
           print(f'       Start: {rec["startTime"]}')
           print(f'       End:   {rec["endTime"]}')
           print(f'       Point: {rec["point"]}')
+          sys.exit(1)
         try:
           float(m[1])
           float(m[2])
@@ -213,6 +244,7 @@ def validate_raw(raw, raw_name, last_end_time):
           print(f'       Start: {rec["startTime"]}')
           print(f'       End:   {rec["endTime"]}')
           print(f'       Point: {rec["point"]}')
+          sys.exit(1)
 
   return last_end_time
 
@@ -250,6 +282,7 @@ def validate_annotated_against_raw(raw, annotated):
   Raise an error and exit if these checks fail.
   """
   err_count = 0
+  close_count = 0
   iraw = 0
   for arec in annotated:
     # Make sure each annotated start / end record exists in the raw timeline.
@@ -274,26 +307,68 @@ def validate_annotated_against_raw(raw, annotated):
     atimeline = arec['timelinePath']
     rtimeline = rrec['timelinePath']
     irpoint = 0
+    atimeline2 = []
     for atlrec in atimeline:
       apoint = atlrec['point']
       aoff = atlrec['durationMinutesOffsetFromStartTime']
+      aioff = int(aoff)
       irpoint2 = irpoint
       while irpoint2 < len(rtimeline) and \
-            (rtimeline[irpoint2]['point'] != apoint or \
-             rtimeline[irpoint2]['durationMinutesOffsetFromStartTime'] != aoff):
+            (int(rtimeline[irpoint2]['durationMinutesOffsetFromStartTime']) < aioff or \
+             rtimeline[irpoint2]['durationMinutesOffsetFromStartTime'] == aoff and \
+             not points_match(apoint, rtimeline[irpoint2]['point'])):
         irpoint2 += 1
-      if irpoint2 >= len(rtimeline):
+
+      if irpoint2 < len(rtimeline) and \
+         aoff == rtimeline[irpoint2]['durationMinutesOffsetFromStartTime']:
+        if apoint == rtimeline[irpoint2]['point']:
+          # This annotated entry has an exact match in the raw timeline.
+          atimeline2.append(atlrec)
+        else:
+          # This annotated entry's offset matches in the raw timeline, but the
+          # location is only a close match.  Delete the annotated entry, so it
+          # will get re-annotated later with the exact location.
+          close_count += 1
+        irpoint = irpoint2 + 1
+      else:
+        # This annotated entry has no match in the raw timeline.  Do not advance
+        # "irpoint", so that we can try to match the subsequent annotated entries
+        # against the raw timeline.
         print(f'ERROR: Annotated point missing from raw:')
         print(f'       start  = {astart}')
         print(f'       offset = {aoff}')
         print(f'       point  = {apoint}')
         err_count += 1
-        continue
-      irpoint = irpoint2
+    arec['timelinePath'] = atimeline2
 
   if err_count:
     print(f'INFO: {err_count} errors')
     sys.exit(1)
+  if close_count:
+    print(f'INFO: {close_count} close matches will be re-annotated with new location.')
+
+
+def points_match(apoint, rpoint):
+  """
+  Determine whether two geolocation points either match exactly or are a close
+  match.
+  """
+  if apoint == rpoint:
+    return True
+  if not args.latitude_slack and not args.longitude_slack:
+    return False
+
+  m = re.match(rePoint, apoint)
+  alat = float(m[1])
+  alon = float(m[2])
+  m = re.match(rePoint, rpoint)
+  rlat = float(m[1])
+  rlon = float(m[2])
+  lat_diff = abs(alat - rlat)
+  lon_diff = abs(alon - rlon)
+  if lat_diff > args.latitude_slack or lon_diff > args.longitude_slack:
+    return False
+  return True
 
 
 def add_annotated_to_cache(annotated, cache):

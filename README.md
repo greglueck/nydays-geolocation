@@ -71,6 +71,27 @@ coordinates in the `<raw-file>` have already been mapped to a US state in the
 of making a new geocoding request.  The `--use-cache` option may be passed
 multiple times if you have several other annotated files.
 
+Each time the "annotate.py" utility runs, it compares the timeline data from the
+`<raw-file>` with the previously annotated data in the `<annotated-file>`.  This
+checks to make sure none of the previously annotated data has changed in the new
+`<raw-file>`.  If any previously annotated location is no longer present in the
+`<raw-file>`, the utility flags an error, and it is up to you to figure out why
+this occurred.  Rarely, Google sometimes changes the latitude and longitude
+coordinates in the last decimal place of the `<raw-file>`, and this will cause
+an error because the previously annotated coordinates do not exactly match the
+coordinates in the new `<raw-file>`.  This appears to be some sort of rounding
+problem on Google's side, and I have only observed it when Google transitioned
+from cloud storage of the Timeline data to local storage.  If this happens,
+you can use the `--latitude-slack` and `--longitude-slack` options to correct
+the problem.  These options relax the comparison of coordinates from the
+`<raw-file>` and `<annotated-file>`, considering the coordinates to match if
+they are within a certain tolerance.  When coordinates are within the tolerance
+(but do not exactly match), the script removes the associated timeline entries
+from the annotated file and then re-annotates those entries from the raw file.
+As a result, the annotated file will contain the exact coordinates from the
+raw file, and subsequent runs of the "annotate.py" utility will not need the
+`--latitude-slack` and `--longitude-slack` options.
+
 ### visualize.py
 
 This utility creates a spreadsheet where each row is a day and the columns
