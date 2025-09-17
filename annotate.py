@@ -60,7 +60,8 @@ def main():
   # Create annotated records for the new raw records, then write out the
   # annotated data.
   annotated = annotate(raw_timeline, annotated, cache)
-  util.write_json_file(annotated, args.annotated)
+  if annotated:
+    util.write_json_file(annotated, args.annotated)
 
 
 def parse_args():
@@ -323,7 +324,8 @@ def annotate(raw, annotated, cache):
   might not be added to the annotated timeline.  If this happens, an info
   message is printed.
 
-  Returns a new list of annotated records.
+  If any new annotated records are added, returns a new list of annotated
+  records.  Otherwise returns None.
   """
 
   # This will become the list of points from the raw timeline that do not exist
@@ -400,7 +402,7 @@ def annotate(raw, annotated, cache):
 
   if not points:
     print(f'INFO: Nothing to annotate.')
-    return annotated
+    return None
 
   # If the total number of points to annotated is greater than the command
   # line limit, pare it back.
