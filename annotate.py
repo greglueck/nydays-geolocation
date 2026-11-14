@@ -853,13 +853,14 @@ def send_one_osm_req(point, email, print_newline):
 
   # A coordinate is reverse mapped by sending a REST request to the
   # openstreetmap server.  The "zoom" argument says that we only care about
-  # state-level granularity.  The "email" argument is required by their usage
-  # policy.
+  # state-level granularity.  The User Agent is required by their usage policy.
   url = 'https://nominatim.openstreetmap.org/reverse'
   req_args = {
     'format': 'json',
-    'zoom': 5,
-    'email': email
+    'zoom': 5
+  }
+  headers = {
+    'User-Agent': 'nydays-geolocation (' + email + ')'
   }
 
   # Add the coordinates to the argument list and send the request.
@@ -867,7 +868,7 @@ def send_one_osm_req(point, email, print_newline):
   req_args['lat'] = m[1]
   req_args['lon'] = m[2]
   try:
-    r = requests.get(url, params=req_args)
+    r = requests.get(url, params=req_args, headers=headers)
   except Exception as e:
     if print_newline: print('')
     print(f'ERROR: HTTP request error: {str(e)}.')
